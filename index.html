@@ -1,1 +1,396 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/><meta name="theme-color" content="#0f172a"/><link rel="manifest" href="/manifest.webmanifest"/><title>Voice Translate</title><style>:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#0f172a;background:#f8fafc}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at top,#e0f2fe 0,#f8fafc 38%,#fff 100%)}button,select{font:inherit}.app{max-width:680px;margin:auto;min-height:100vh;padding:24px 18px 36px}.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px}.logo{width:42px;height:42px;border-radius:14px;background:#0f172a;color:#fff;display:grid;place-items:center;font-size:21px;box-shadow:0 10px 30px rgba(15,23,42,.18)}h1{font-size:1.4rem;margin:0}.sub{margin:3px 0 0;color:#64748b;font-size:.92rem}.card{background:rgba(255,255,255,.88);backdrop-filter:blur(12px);border:1px solid #e2e8f0;border-radius:24px;padding:18px;box-shadow:0 18px 50px rgba(15,23,42,.08)}.langs{display:grid;grid-template-columns:1fr 48px 1fr;gap:10px;align-items:end}.label{font-size:.78rem;color:#64748b;margin-bottom:7px;font-weight:700}select{width:100%;padding:13px;border:1px solid #cbd5e1;border-radius:14px;background:#fff}.swap{height:46px;border:0;border-radius:14px;background:#eef2ff;font-size:20px;cursor:pointer}.micWrap{text-align:center;padding:34px 0 28px}.mic{width:108px;height:108px;border-radius:50%;border:0;background:#0f172a;color:#fff;font-size:42px;cursor:pointer;box-shadow:0 16px 40px rgba(15,23,42,.28);transition:.2s}.mic.listening{background:#dc2626;transform:scale(1.04);box-shadow:0 0 0 12px rgba(220,38,38,.12),0 16px 40px rgba(220,38,38,.25)}.status{margin-top:14px;color:#475569;font-size:.92rem}.panel{border-top:1px solid #e2e8f0;padding-top:18px;margin-top:4px}.sectionTitle{display:flex;justify-content:space-between;align-items:center;font-size:.85rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.05em}.textBox{min-height:92px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:14px;margin-top:8px;line-height:1.55;color:#0f172a;white-space:pre-wrap}.placeholder{color:#94a3b8}.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}.btn{border:1px solid #cbd5e1;background:#fff;border-radius:14px;padding:12px 9px;font-weight:700;cursor:pointer}.btn.primary{background:#0f172a;color:#fff;border-color:#0f172a}.hint{text-align:center;color:#94a3b8;font-size:.8rem;margin-top:18px}@media(max-width:520px){.app{padding:18px 14px 28px}.card{border-radius:20px}.langs{grid-template-columns:1fr 44px 1fr}.actions{grid-template-columns:1fr 1fr}.btn:last-child{grid-column:1/-1}}</style></head><body><main class="app"><div class="brand"><div class="logo">🎙️</div><div><h1>Voice Translate</h1><p class="sub">Speak naturally. Read or hear the translation.</p></div></div><section class="card"><div class="langs"><div><div class="label">INPUT</div><select id="inputLang"><option value="en-US">English</option><option value="nl-NL">Dutch</option><option value="fr-FR">French</option><option value="de-DE">German</option><option value="es-ES">Spanish</option><option value="it-IT">Italian</option><option value="hi-IN">Hindi</option><option value="ml-IN">Malayalam</option><option value="ta-IN">Tamil</option></select></div><button class="swap" id="swap" aria-label="Swap languages">⇄</button><div><div class="label">OUTPUT</div><select id="outputLang"><option value="fr-FR">French</option><option value="en-US">English</option><option value="nl-NL">Dutch</option><option value="de-DE">German</option><option value="es-ES">Spanish</option><option value="it-IT">Italian</option><option value="hi-IN">Hindi</option><option value="ml-IN">Malayalam</option><option value="ta-IN">Tamil</option></select></div></div><div class="micWrap"><button class="mic" id="mic" aria-label="Start speaking">🎤</button><div class="status" id="status">Tap the microphone and start speaking</div></div><div class="panel"><div class="sectionTitle">Transcription</div><div class="textBox placeholder" id="transcript">Your speech will appear here.</div></div><div class="panel"><div class="sectionTitle">Translation</div><div class="textBox placeholder" id="translation">Your translation will appear here.</div><div class="actions"><button class="btn" id="copy">Copy</button><button class="btn primary" id="speak">🔊 Speak</button><button class="btn" id="clear">Clear</button></div></div></section><div class="hint">Prototype • installable PWA • no sign-in</div></main><script>const mic=document.getElementById('mic'),statusEl=document.getElementById('status'),transcriptEl=document.getElementById('transcript'),translationEl=document.getElementById('translation'),input=document.getElementById('inputLang'),output=document.getElementById('outputLang');let recognition;const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(SR){recognition=new SR();recognition.continuous=false;recognition.interimResults=true;recognition.onstart=()=>{mic.classList.add('listening');statusEl.textContent='Listening… tap again to stop'};recognition.onend=()=>{mic.classList.remove('listening');statusEl.textContent='Tap the microphone and start speaking'};recognition.onresult=e=>{let final='',interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;e.results[i].isFinal?final+=t:interim+=t}transcriptEl.classList.remove('placeholder');transcriptEl.textContent=final||interim;if(final){translationEl.classList.remove('placeholder');translationEl.textContent='Prototype translation: '+final;}};recognition.onerror=e=>{statusEl.textContent='Microphone error: '+e.error;mic.classList.remove('listening')}}else statusEl.textContent='Speech recognition is not supported in this browser.';mic.onclick=()=>{if(!recognition)return;recognition.lang=input.value;try{recognition.start()}catch{recognition.stop()}};document.getElementById('swap').onclick=()=>{const a=input.value;input.value=output.value;output.value=a};document.getElementById('clear').onclick=()=>{transcriptEl.textContent='Your speech will appear here.';translationEl.textContent='Your translation will appear here.';transcriptEl.className='textBox placeholder';translationEl.className='textBox placeholder'};document.getElementById('copy').onclick=async()=>{const t=translationEl.textContent;if(!translationEl.classList.contains('placeholder')){await navigator.clipboard.writeText(t);statusEl.textContent='Translation copied'}};document.getElementById('speak').onclick=()=>{if(translationEl.classList.contains('placeholder'))return;const u=new SpeechSynthesisUtterance(translationEl.textContent.replace('Prototype translation: ',''));u.lang=output.value;speechSynthesis.cancel();speechSynthesis.speak(u)};if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js');</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Voice Translate" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <title>Voice Translate</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#0f172a;background:#f8fafc}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;background:radial-gradient(circle at top,#e0f2fe 0,#f8fafc 38%,#fff 100%)}
+    button,select{font:inherit}
+    .app{max-width:680px;margin:auto;min-height:100vh;padding:24px 18px 36px}
+    .brand{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+    .logo{width:42px;height:42px;border-radius:14px;background:#0f172a;color:#fff;display:grid;place-items:center;font-size:21px;box-shadow:0 10px 30px rgba(15,23,42,.18)}
+    h1{font-size:1.4rem;margin:0}
+    .sub{margin:3px 0 0;color:#64748b;font-size:.92rem}
+    .card{background:rgba(255,255,255,.9);backdrop-filter:blur(12px);border:1px solid #e2e8f0;border-radius:24px;padding:18px;box-shadow:0 18px 50px rgba(15,23,42,.08)}
+    .langs{display:grid;grid-template-columns:1fr 48px 1fr;gap:10px;align-items:end}
+    .label{font-size:.78rem;color:#64748b;margin-bottom:7px;font-weight:700}
+    select{width:100%;padding:13px;border:1px solid #cbd5e1;border-radius:14px;background:#fff}
+    .swap{height:46px;border:0;border-radius:14px;background:#eef2ff;font-size:20px;cursor:pointer}
+    .micWrap{text-align:center;padding:34px 0 28px}
+    .mic{width:112px;height:112px;border-radius:50%;border:0;background:#0f172a;color:#fff;font-size:42px;cursor:pointer;box-shadow:0 16px 40px rgba(15,23,42,.28);transition:.2s}
+    .mic.listening{background:#dc2626;transform:scale(1.04);box-shadow:0 0 0 12px rgba(220,38,38,.12),0 16px 40px rgba(220,38,38,.25);animation:pulse 1.7s infinite}
+    @keyframes pulse{0%,100%{box-shadow:0 0 0 8px rgba(220,38,38,.10),0 16px 40px rgba(220,38,38,.25)}50%{box-shadow:0 0 0 16px rgba(220,38,38,.05),0 16px 40px rgba(220,38,38,.25)}}
+    .status{margin-top:14px;color:#475569;font-size:.92rem;min-height:22px}
+    .liveDot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#dc2626;margin-right:6px;vertical-align:1px}
+    .panel{border-top:1px solid #e2e8f0;padding-top:18px;margin-top:4px}
+    .sectionTitle{display:flex;justify-content:space-between;align-items:center;font-size:.85rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.05em}
+    .smallStatus{font-size:.72rem;font-weight:700;text-transform:none;letter-spacing:0;color:#94a3b8}
+    .textBox{min-height:96px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:14px;margin-top:8px;line-height:1.55;color:#0f172a;white-space:pre-wrap}
+    .placeholder{color:#94a3b8}
+    .actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+    .btn{border:1px solid #cbd5e1;background:#fff;border-radius:14px;padding:12px 9px;font-weight:700;cursor:pointer}
+    .btn.primary{background:#0f172a;color:#fff;border-color:#0f172a}
+    .btn:disabled{opacity:.45;cursor:not-allowed}
+    .hint{text-align:center;color:#94a3b8;font-size:.8rem;margin-top:18px}
+    @media(max-width:520px){.app{padding:18px 14px 28px}.card{border-radius:20px}.langs{grid-template-columns:1fr 44px 1fr}.actions{grid-template-columns:1fr 1fr}.btn:last-child{grid-column:1/-1}}
+  </style>
+</head>
+<body>
+  <main class="app">
+    <div class="brand">
+      <div class="logo">🎙️</div>
+      <div>
+        <h1>Voice Translate</h1>
+        <p class="sub">Tap once to start. Tap again to stop.</p>
+      </div>
+    </div>
+
+    <section class="card">
+      <div class="langs">
+        <div>
+          <div class="label">INPUT</div>
+          <select id="inputLang">
+            <option value="en-US">English</option>
+            <option value="nl-NL">Dutch</option>
+            <option value="fr-FR">French</option>
+            <option value="de-DE">German</option>
+            <option value="es-ES">Spanish</option>
+            <option value="it-IT">Italian</option>
+            <option value="hi-IN">Hindi</option>
+            <option value="ml-IN">Malayalam</option>
+            <option value="ta-IN">Tamil</option>
+          </select>
+        </div>
+        <button class="swap" id="swap" aria-label="Swap languages">⇄</button>
+        <div>
+          <div class="label">OUTPUT</div>
+          <select id="outputLang">
+            <option value="fr-FR">French</option>
+            <option value="en-US">English</option>
+            <option value="nl-NL">Dutch</option>
+            <option value="de-DE">German</option>
+            <option value="es-ES">Spanish</option>
+            <option value="it-IT">Italian</option>
+            <option value="hi-IN">Hindi</option>
+            <option value="ml-IN">Malayalam</option>
+            <option value="ta-IN">Tamil</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="micWrap">
+        <button class="mic" id="mic" aria-label="Start listening">🎤</button>
+        <div class="status" id="status">Tap the microphone and start speaking</div>
+      </div>
+
+      <div class="panel">
+        <div class="sectionTitle">
+          <span>Live transcription</span>
+          <span class="smallStatus" id="speechState"></span>
+        </div>
+        <div class="textBox placeholder" id="transcript">Your speech will appear here.</div>
+      </div>
+
+      <div class="panel">
+        <div class="sectionTitle">
+          <span>Live translation</span>
+          <span class="smallStatus" id="translationState"></span>
+        </div>
+        <div class="textBox placeholder" id="translation">Your translation will appear here.</div>
+        <div class="actions">
+          <button class="btn" id="copy">Copy</button>
+          <button class="btn primary" id="speak">🔊 Speak</button>
+          <button class="btn" id="clear">Clear</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="hint">AI translation • installable PWA • no sign-in</div>
+  </main>
+
+  <script>
+    const mic = document.getElementById('mic');
+    const statusEl = document.getElementById('status');
+    const speechState = document.getElementById('speechState');
+    const translationState = document.getElementById('translationState');
+    const transcriptEl = document.getElementById('transcript');
+    const translationEl = document.getElementById('translation');
+    const input = document.getElementById('inputLang');
+    const output = document.getElementById('outputLang');
+    const copyBtn = document.getElementById('copy');
+    const speakBtn = document.getElementById('speak');
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let shouldListen = false;
+    let committedTranscript = '';
+    let restartTimer = null;
+    let translateTimer = null;
+    let translateController = null;
+    let translateSequence = 0;
+    let lastRequestedText = '';
+
+    function normalizeSpaces(value) {
+      return value.replace(/\s+/g, ' ').trim();
+    }
+
+    function setTranscript(text) {
+      if (!text) {
+        transcriptEl.textContent = 'Your speech will appear here.';
+        transcriptEl.className = 'textBox placeholder';
+        return;
+      }
+      transcriptEl.textContent = text;
+      transcriptEl.className = 'textBox';
+    }
+
+    function setTranslation(text) {
+      if (!text) {
+        translationEl.textContent = 'Your translation will appear here.';
+        translationEl.className = 'textBox placeholder';
+        return;
+      }
+      translationEl.textContent = text;
+      translationEl.className = 'textBox';
+    }
+
+    function scheduleTranslation(text, immediate = false) {
+      const clean = normalizeSpaces(text);
+      clearTimeout(translateTimer);
+
+      if (!clean) {
+        lastRequestedText = '';
+        setTranslation('');
+        translationState.textContent = '';
+        return;
+      }
+
+      translateTimer = setTimeout(() => translateText(clean), immediate ? 0 : 550);
+    }
+
+    async function translateText(text) {
+      if (text === lastRequestedText && !translationEl.classList.contains('placeholder')) return;
+      lastRequestedText = text;
+      const sequence = ++translateSequence;
+
+      if (translateController) translateController.abort();
+      translateController = new AbortController();
+
+      translationState.textContent = 'Translating…';
+
+      try {
+        const response = await fetch('/api/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: translateController.signal,
+          body: JSON.stringify({
+            text,
+            sourceLanguage: input.value,
+            targetLanguage: output.value
+          })
+        });
+
+        if (!response.ok) {
+          const detail = await response.json().catch(() => ({}));
+          throw new Error(detail.error || 'Translation request failed');
+        }
+
+        const data = await response.json();
+        if (sequence !== translateSequence) return;
+
+        setTranslation(data.translation || '');
+        translationState.textContent = shouldListen ? 'Live' : 'Ready';
+      } catch (error) {
+        if (error.name === 'AbortError') return;
+        console.error(error);
+        translationState.textContent = 'Translation unavailable';
+        statusEl.textContent = 'Could not translate. Please try again.';
+      }
+    }
+
+    function restartRecognitionSoon() {
+      clearTimeout(restartTimer);
+      if (!shouldListen || !recognition) return;
+
+      restartTimer = setTimeout(() => {
+        if (!shouldListen) return;
+        try {
+          recognition.lang = input.value;
+          recognition.start();
+        } catch (error) {
+          setTimeout(restartRecognitionSoon, 500);
+        }
+      }, 220);
+    }
+
+    if (SR) {
+      recognition = new SR();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        mic.classList.add('listening');
+        mic.setAttribute('aria-label', 'Stop listening');
+        statusEl.innerHTML = '<span class="liveDot"></span>Listening — tap the microphone to stop';
+        speechState.textContent = 'Listening';
+      };
+
+      recognition.onresult = (event) => {
+        let interim = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const spoken = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            committedTranscript = normalizeSpaces(committedTranscript + ' ' + spoken);
+          } else {
+            interim += ' ' + spoken;
+          }
+        }
+
+        const visibleText = normalizeSpaces(committedTranscript + ' ' + interim);
+        setTranscript(visibleText);
+        speechState.textContent = interim ? 'Hearing you…' : 'Captured';
+        scheduleTranslation(visibleText);
+      };
+
+      recognition.onend = () => {
+        mic.classList.remove('listening');
+
+        if (shouldListen) {
+          speechState.textContent = 'Reconnecting…';
+          statusEl.innerHTML = '<span class="liveDot"></span>Listening';
+          restartRecognitionSoon();
+        } else {
+          mic.setAttribute('aria-label', 'Start listening');
+          speechState.textContent = committedTranscript ? 'Stopped' : '';
+          statusEl.textContent = 'Stopped — tap the microphone to continue';
+          if (committedTranscript) scheduleTranslation(committedTranscript, true);
+        }
+      };
+
+      recognition.onerror = (event) => {
+        if (event.error === 'aborted') return;
+
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          shouldListen = false;
+          mic.classList.remove('listening');
+          speechState.textContent = '';
+          statusEl.textContent = 'Microphone permission is required.';
+          return;
+        }
+
+        if (event.error === 'no-speech') {
+          speechState.textContent = 'Waiting for speech…';
+          return;
+        }
+
+        console.warn('Speech recognition error:', event.error);
+        speechState.textContent = 'Reconnecting…';
+      };
+    } else {
+      statusEl.textContent = 'Speech recognition is not supported in this browser.';
+      mic.disabled = true;
+    }
+
+    mic.onclick = () => {
+      if (!recognition) return;
+
+      if (shouldListen) {
+        shouldListen = false;
+        clearTimeout(restartTimer);
+        try { recognition.stop(); } catch {}
+        return;
+      }
+
+      shouldListen = true;
+      recognition.lang = input.value;
+      statusEl.textContent = 'Starting microphone…';
+
+      try {
+        recognition.start();
+      } catch {
+        restartRecognitionSoon();
+      }
+    };
+
+    document.getElementById('swap').onclick = () => {
+      const currentInput = input.value;
+      input.value = output.value;
+      output.value = currentInput;
+
+      if (shouldListen && recognition) {
+        try { recognition.stop(); } catch {}
+      }
+
+      const text = normalizeSpaces(transcriptEl.classList.contains('placeholder') ? '' : transcriptEl.textContent);
+      if (text) {
+        lastRequestedText = '';
+        scheduleTranslation(text, true);
+      }
+    };
+
+    input.onchange = () => {
+      if (shouldListen && recognition) {
+        try { recognition.stop(); } catch {}
+      }
+      const text = normalizeSpaces(transcriptEl.classList.contains('placeholder') ? '' : transcriptEl.textContent);
+      if (text) {
+        lastRequestedText = '';
+        scheduleTranslation(text, true);
+      }
+    };
+
+    output.onchange = () => {
+      const text = normalizeSpaces(transcriptEl.classList.contains('placeholder') ? '' : transcriptEl.textContent);
+      if (text) {
+        lastRequestedText = '';
+        scheduleTranslation(text, true);
+      }
+    };
+
+    document.getElementById('clear').onclick = () => {
+      committedTranscript = '';
+      lastRequestedText = '';
+      ++translateSequence;
+      clearTimeout(translateTimer);
+      if (translateController) translateController.abort();
+      setTranscript('');
+      setTranslation('');
+      translationState.textContent = '';
+      speechState.textContent = shouldListen ? 'Listening' : '';
+      statusEl.textContent = shouldListen ? 'Listening — tap the microphone to stop' : 'Tap the microphone and start speaking';
+    };
+
+    copyBtn.onclick = async () => {
+      if (translationEl.classList.contains('placeholder')) return;
+      try {
+        await navigator.clipboard.writeText(translationEl.textContent);
+        statusEl.textContent = 'Translation copied';
+      } catch {
+        statusEl.textContent = 'Copy failed';
+      }
+    };
+
+    speakBtn.onclick = () => {
+      if (translationEl.classList.contains('placeholder')) return;
+      const utterance = new SpeechSynthesisUtterance(translationEl.textContent);
+      utterance.lang = output.value;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(utterance);
+    };
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+    }
+  </script>
+</body>
+</html>
