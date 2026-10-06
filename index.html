@@ -30,6 +30,7 @@
     @keyframes pulse{0%,100%{box-shadow:0 0 0 8px rgba(220,38,38,.10),0 16px 40px rgba(220,38,38,.25)}50%{box-shadow:0 0 0 16px rgba(220,38,38,.05),0 16px 40px rgba(220,38,38,.25)}}
     .status{margin-top:14px;color:#475569;font-size:.92rem;min-height:22px}
     .liveDot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#dc2626;margin-right:6px;vertical-align:1px}
+    .engine{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:6px 10px;border-radius:999px;background:#eef2ff;color:#4338ca;font-size:.75rem;font-weight:800}
     .panel{border-top:1px solid #e2e8f0;padding-top:18px;margin-top:4px}
     .sectionTitle{display:flex;justify-content:space-between;align-items:center;font-size:.85rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.05em}
     .smallStatus{font-size:.72rem;font-weight:700;text-transform:none;letter-spacing:0;color:#94a3b8}
@@ -49,7 +50,7 @@
       <div class="logo">🎙️</div>
       <div>
         <h1>Voice Translate</h1>
-        <p class="sub">Tap once to start. Tap again to stop.</p>
+        <p class="sub">High-accuracy live speech transcription and translation.</p>
       </div>
     </div>
 
@@ -89,6 +90,7 @@
       <div class="micWrap">
         <button class="mic" id="mic" aria-label="Start listening">🎤</button>
         <div class="status" id="status">Tap the microphone and start speaking</div>
+        <div class="engine" id="engineBadge">Realtime Whisper</div>
       </div>
 
       <div class="panel">
@@ -113,284 +115,9 @@
       </div>
     </section>
 
-    <div class="hint">AI translation • installable PWA • no sign-in</div>
+    <div class="hint">Realtime Whisper transcription • GPT translation • no sign-in</div>
   </main>
 
-  <script>
-    const mic = document.getElementById('mic');
-    const statusEl = document.getElementById('status');
-    const speechState = document.getElementById('speechState');
-    const translationState = document.getElementById('translationState');
-    const transcriptEl = document.getElementById('transcript');
-    const translationEl = document.getElementById('translation');
-    const input = document.getElementById('inputLang');
-    const output = document.getElementById('outputLang');
-    const copyBtn = document.getElementById('copy');
-    const speakBtn = document.getElementById('speak');
-
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let recognition = null;
-    let shouldListen = false;
-    let committedTranscript = '';
-    let restartTimer = null;
-    let translateTimer = null;
-    let translateController = null;
-    let translateSequence = 0;
-    let lastRequestedText = '';
-
-    function normalizeSpaces(value) {
-      return value.replace(/\s+/g, ' ').trim();
-    }
-
-    function setTranscript(text) {
-      if (!text) {
-        transcriptEl.textContent = 'Your speech will appear here.';
-        transcriptEl.className = 'textBox placeholder';
-        return;
-      }
-      transcriptEl.textContent = text;
-      transcriptEl.className = 'textBox';
-    }
-
-    function setTranslation(text) {
-      if (!text) {
-        translationEl.textContent = 'Your translation will appear here.';
-        translationEl.className = 'textBox placeholder';
-        return;
-      }
-      translationEl.textContent = text;
-      translationEl.className = 'textBox';
-    }
-
-    function scheduleTranslation(text, immediate = false) {
-      const clean = normalizeSpaces(text);
-      clearTimeout(translateTimer);
-
-      if (!clean) {
-        lastRequestedText = '';
-        setTranslation('');
-        translationState.textContent = '';
-        return;
-      }
-
-      translateTimer = setTimeout(() => translateText(clean), immediate ? 0 : 550);
-    }
-
-    async function translateText(text) {
-      if (text === lastRequestedText && !translationEl.classList.contains('placeholder')) return;
-      lastRequestedText = text;
-      const sequence = ++translateSequence;
-
-      if (translateController) translateController.abort();
-      translateController = new AbortController();
-
-      translationState.textContent = 'Translating…';
-
-      try {
-        const response = await fetch('/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: translateController.signal,
-          body: JSON.stringify({
-            text,
-            sourceLanguage: input.value,
-            targetLanguage: output.value
-          })
-        });
-
-        if (!response.ok) {
-          const detail = await response.json().catch(() => ({}));
-          throw new Error(detail.error || 'Translation request failed');
-        }
-
-        const data = await response.json();
-        if (sequence !== translateSequence) return;
-
-        setTranslation(data.translation || '');
-        translationState.textContent = shouldListen ? 'Live' : 'Ready';
-      } catch (error) {
-        if (error.name === 'AbortError') return;
-        console.error(error);
-        translationState.textContent = 'Translation unavailable';
-        statusEl.textContent = 'Could not translate. Please try again.';
-      }
-    }
-
-    function restartRecognitionSoon() {
-      clearTimeout(restartTimer);
-      if (!shouldListen || !recognition) return;
-
-      restartTimer = setTimeout(() => {
-        if (!shouldListen) return;
-        try {
-          recognition.lang = input.value;
-          recognition.start();
-        } catch (error) {
-          setTimeout(restartRecognitionSoon, 500);
-        }
-      }, 220);
-    }
-
-    if (SR) {
-      recognition = new SR();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.maxAlternatives = 1;
-
-      recognition.onstart = () => {
-        mic.classList.add('listening');
-        mic.setAttribute('aria-label', 'Stop listening');
-        statusEl.innerHTML = '<span class="liveDot"></span>Listening — tap the microphone to stop';
-        speechState.textContent = 'Listening';
-      };
-
-      recognition.onresult = (event) => {
-        let interim = '';
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const spoken = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            committedTranscript = normalizeSpaces(committedTranscript + ' ' + spoken);
-          } else {
-            interim += ' ' + spoken;
-          }
-        }
-
-        const visibleText = normalizeSpaces(committedTranscript + ' ' + interim);
-        setTranscript(visibleText);
-        speechState.textContent = interim ? 'Hearing you…' : 'Captured';
-        scheduleTranslation(visibleText);
-      };
-
-      recognition.onend = () => {
-        mic.classList.remove('listening');
-
-        if (shouldListen) {
-          speechState.textContent = 'Reconnecting…';
-          statusEl.innerHTML = '<span class="liveDot"></span>Listening';
-          restartRecognitionSoon();
-        } else {
-          mic.setAttribute('aria-label', 'Start listening');
-          speechState.textContent = committedTranscript ? 'Stopped' : '';
-          statusEl.textContent = 'Stopped — tap the microphone to continue';
-          if (committedTranscript) scheduleTranslation(committedTranscript, true);
-        }
-      };
-
-      recognition.onerror = (event) => {
-        if (event.error === 'aborted') return;
-
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-          shouldListen = false;
-          mic.classList.remove('listening');
-          speechState.textContent = '';
-          statusEl.textContent = 'Microphone permission is required.';
-          return;
-        }
-
-        if (event.error === 'no-speech') {
-          speechState.textContent = 'Waiting for speech…';
-          return;
-        }
-
-        console.warn('Speech recognition error:', event.error);
-        speechState.textContent = 'Reconnecting…';
-      };
-    } else {
-      statusEl.textContent = 'Speech recognition is not supported in this browser.';
-      mic.disabled = true;
-    }
-
-    mic.onclick = () => {
-      if (!recognition) return;
-
-      if (shouldListen) {
-        shouldListen = false;
-        clearTimeout(restartTimer);
-        try { recognition.stop(); } catch {}
-        return;
-      }
-
-      shouldListen = true;
-      recognition.lang = input.value;
-      statusEl.textContent = 'Starting microphone…';
-
-      try {
-        recognition.start();
-      } catch {
-        restartRecognitionSoon();
-      }
-    };
-
-    document.getElementById('swap').onclick = () => {
-      const currentInput = input.value;
-      input.value = output.value;
-      output.value = currentInput;
-
-      if (shouldListen && recognition) {
-        try { recognition.stop(); } catch {}
-      }
-
-      const text = normalizeSpaces(transcriptEl.classList.contains('placeholder') ? '' : transcriptEl.textContent);
-      if (text) {
-        lastRequestedText = '';
-        scheduleTranslation(text, true);
-      }
-    };
-
-    input.onchange = () => {
-      if (shouldListen && recognition) {
-        try { recognition.stop(); } catch {}
-      }
-      const text = normalizeSpaces(transcriptEl.classList.contains('placeholder') ? '' : transcriptEl.textContent);
-      if (text) {
-        lastRequestedText = '';
-        scheduleTranslation(text, true);
-      }
-    };
-
-    output.onchange = () => {
-      const text = normalizeSpaces(transcriptEl.classList.contains('placeholder') ? '' : transcriptEl.textContent);
-      if (text) {
-        lastRequestedText = '';
-        scheduleTranslation(text, true);
-      }
-    };
-
-    document.getElementById('clear').onclick = () => {
-      committedTranscript = '';
-      lastRequestedText = '';
-      ++translateSequence;
-      clearTimeout(translateTimer);
-      if (translateController) translateController.abort();
-      setTranscript('');
-      setTranslation('');
-      translationState.textContent = '';
-      speechState.textContent = shouldListen ? 'Listening' : '';
-      statusEl.textContent = shouldListen ? 'Listening — tap the microphone to stop' : 'Tap the microphone and start speaking';
-    };
-
-    copyBtn.onclick = async () => {
-      if (translationEl.classList.contains('placeholder')) return;
-      try {
-        await navigator.clipboard.writeText(translationEl.textContent);
-        statusEl.textContent = 'Translation copied';
-      } catch {
-        statusEl.textContent = 'Copy failed';
-      }
-    };
-
-    speakBtn.onclick = () => {
-      if (translationEl.classList.contains('placeholder')) return;
-      const utterance = new SpeechSynthesisUtterance(translationEl.textContent);
-      utterance.lang = output.value;
-      speechSynthesis.cancel();
-      speechSynthesis.speak(utterance);
-    };
-
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
-    }
-  </script>
+  <script type="module" src="/src/main.js"></script>
 </body>
 </html>
