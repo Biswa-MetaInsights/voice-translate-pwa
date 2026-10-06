@@ -1,11 +1,36 @@
 {
   "name": "Voice Translate",
   "short_name": "VoiceTranslate",
-  "description": "Simple voice-to-text and voice translation PWA.",
+  "description": "Live voice transcription and AI translation in a simple installable app.",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#0f172a",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "background_color": "#f3fbfa",
+  "theme_color": "#0f766e",
   "orientation": "portrait-primary",
-  "lang": "en"
+  "lang": "en",
+  "categories": ["utilities", "productivity", "travel"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Start translating",
+      "short_name": "Translate",
+      "url": "/"
+    }
+  ]
 }
