@@ -1,4 +1,4 @@
-const CACHE = "voice-translate-v1";
+const CACHE = "voice-translate-v2";
 const ASSETS = ["/", "/index.html", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
@@ -17,6 +17,10 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith("/api/")) return;
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {
