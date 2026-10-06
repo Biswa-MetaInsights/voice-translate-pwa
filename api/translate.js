@@ -1,13 +1,12 @@
 const LANGUAGES = {
-  'en-US': 'English',
-  'nl-NL': 'Dutch',
-  'fr-FR': 'French',
-  'de-DE': 'German',
-  'es-ES': 'Spanish',
-  'it-IT': 'Italian',
-  'hi-IN': 'Hindi',
-  'ml-IN': 'Malayalam',
-  'ta-IN': 'Tamil'
+  'en-US':'English','fr-FR':'French','nl-NL':'Dutch','de-DE':'German','lb-LU':'Luxembourgish','ga-IE':'Irish',
+  'da-DK':'Danish','sv-SE':'Swedish','no-NO':'Norwegian','fi-FI':'Finnish','is-IS':'Icelandic','et-EE':'Estonian',
+  'lv-LV':'Latvian','lt-LT':'Lithuanian','pl-PL':'Polish','cs-CZ':'Czech','sk-SK':'Slovak','hu-HU':'Hungarian',
+  'ro-RO':'Romanian','rm-CH':'Romansh','it-IT':'Italian','es-ES':'Spanish','pt-PT':'Portuguese','el-GR':'Greek',
+  'mt-MT':'Maltese','ca-ES':'Catalan','bg-BG':'Bulgarian','hr-HR':'Croatian','sl-SI':'Slovenian','sr-RS':'Serbian',
+  'bs-BA':'Bosnian','sq-AL':'Albanian','mk-MK':'Macedonian','uk-UA':'Ukrainian','ru-RU':'Russian','tr-TR':'Turkish',
+  'ar-SA':'Arabic','zh-CN':'Chinese (Mandarin)','hi-IN':'Hindi','ml-IN':'Malayalam','ta-IN':'Tamil','te-IN':'Telugu',
+  'kn-IN':'Kannada'
 };
 
 export default async function handler(req, res) {
