@@ -1,91 +1,88 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="calm">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#0f172a" />
+  <meta name="theme-color" content="#f3fbfa" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Voice Translate" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <title>Voice Translate</title>
   <style>
-    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#0f172a;background:#f8fafc}
+    :root{
+      font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      --bg:#f3fbfa;--surface:#ffffff;--surface2:#eef8f6;--text:#102522;--muted:#68817d;
+      --line:#dcebe8;--accent:#0f766e;--accent2:#2dd4bf;--accentText:#fff;--shadow:rgba(15,118,110,.14);
+      --micShadow:rgba(15,118,110,.24);--radius:26px;--hero:linear-gradient(145deg,#ffffff 0%,#eefbf8 100%);
+    }
+    html[data-theme="electric"]{--bg:#061017;--surface:#0d1a22;--surface2:#112631;--text:#f7fbff;--muted:#8faab6;--line:#203642;--accent:#00e5ff;--accent2:#b7ff3c;--accentText:#001016;--shadow:rgba(0,229,255,.14);--micShadow:rgba(0,229,255,.32);--hero:linear-gradient(145deg,#0c1820 0%,#07232a 100%)}
+    html[data-theme="sport"]{--bg:#fff7f0;--surface:#ffffff;--surface2:#fff0e6;--text:#26130b;--muted:#886a5b;--line:#f0ddd2;--accent:#f04a23;--accent2:#ffb000;--accentText:#fff;--shadow:rgba(240,74,35,.14);--micShadow:rgba(240,74,35,.28);--radius:18px;--hero:linear-gradient(135deg,#fff 0%,#fff0e3 100%)}
+    html[data-theme="professional"]{--bg:#f3f6fa;--surface:#ffffff;--surface2:#eef2f7;--text:#14213d;--muted:#66758a;--line:#dce3ec;--accent:#1f4b8f;--accent2:#5c7cba;--accentText:#fff;--shadow:rgba(31,75,143,.12);--micShadow:rgba(31,75,143,.24);--radius:16px;--hero:linear-gradient(145deg,#fff 0%,#f2f6fb 100%)}
+    html[data-theme="elegant"]{--bg:#f8f4ed;--surface:#fffdf9;--surface2:#f1ebe1;--text:#251f19;--muted:#7d7164;--line:#e6ddd2;--accent:#7c5b3e;--accent2:#c7a46a;--accentText:#fff;--shadow:rgba(70,51,34,.12);--micShadow:rgba(124,91,62,.24);--radius:30px;--hero:linear-gradient(145deg,#fffdf9 0%,#f3eadc 100%)}
     *{box-sizing:border-box}
-    body{margin:0;min-height:100vh;background:radial-gradient(circle at top,#e0f2fe 0,#f8fafc 38%,#fff 100%)}
-    button,select{font:inherit}
-    .app{max-width:680px;margin:auto;min-height:100vh;padding:24px 18px 36px}
-    .brand{display:flex;align-items:center;gap:12px;margin-bottom:24px}
-    .logo{width:42px;height:42px;border-radius:14px;background:#0f172a;color:#fff;display:grid;place-items:center;font-size:21px;box-shadow:0 10px 30px rgba(15,23,42,.18)}
-    h1{font-size:1.4rem;margin:0}
-    .sub{margin:3px 0 0;color:#64748b;font-size:.92rem}
-    .card{background:rgba(255,255,255,.9);backdrop-filter:blur(12px);border:1px solid #e2e8f0;border-radius:24px;padding:18px;box-shadow:0 18px 50px rgba(15,23,42,.08)}
-    .langs{display:grid;grid-template-columns:1fr 48px 1fr;gap:10px;align-items:end}
-    .label{font-size:.78rem;color:#64748b;margin-bottom:7px;font-weight:700}
-    select{width:100%;padding:13px;border:1px solid #cbd5e1;border-radius:14px;background:#fff}
-    .swap{height:46px;border:0;border-radius:14px;background:#eef2ff;font-size:20px;cursor:pointer}
-    .micWrap{text-align:center;padding:34px 0 28px}
-    .mic{width:112px;height:112px;border-radius:50%;border:0;background:#0f172a;color:#fff;font-size:42px;cursor:pointer;box-shadow:0 16px 40px rgba(15,23,42,.28);transition:.2s}
-    .mic.listening{background:#dc2626;transform:scale(1.04);box-shadow:0 0 0 12px rgba(220,38,38,.12),0 16px 40px rgba(220,38,38,.25);animation:pulse 1.7s infinite}
-    @keyframes pulse{0%,100%{box-shadow:0 0 0 8px rgba(220,38,38,.10),0 16px 40px rgba(220,38,38,.25)}50%{box-shadow:0 0 0 16px rgba(220,38,38,.05),0 16px 40px rgba(220,38,38,.25)}}
-    .status{margin-top:14px;color:#475569;font-size:.92rem;min-height:22px}
-    .liveDot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#dc2626;margin-right:6px;vertical-align:1px}
-    .engine{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:6px 10px;border-radius:999px;background:#eef2ff;color:#4338ca;font-size:.75rem;font-weight:800}
-    .panel{border-top:1px solid #e2e8f0;padding-top:18px;margin-top:4px}
-    .sectionTitle{display:flex;justify-content:space-between;align-items:center;font-size:.85rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.05em}
-    .smallStatus{font-size:.72rem;font-weight:700;text-transform:none;letter-spacing:0;color:#94a3b8}
-    .textBox{min-height:96px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:14px;margin-top:8px;line-height:1.55;color:#0f172a;white-space:pre-wrap}
-    .placeholder{color:#94a3b8}
-    .actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
-    .btn{border:1px solid #cbd5e1;background:#fff;border-radius:14px;padding:12px 9px;font-weight:700;cursor:pointer}
-    .btn.primary{background:#0f172a;color:#fff;border-color:#0f172a}
-    .btn:disabled{opacity:.45;cursor:not-allowed}
-    .hint{text-align:center;color:#94a3b8;font-size:.8rem;margin-top:18px}
-    @media(max-width:520px){.app{padding:18px 14px 28px}.card{border-radius:20px}.langs{grid-template-columns:1fr 44px 1fr}.actions{grid-template-columns:1fr 1fr}.btn:last-child{grid-column:1/-1}}
+    body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);transition:background .2s,color .2s}
+    button,input{font:inherit}
+    button{-webkit-tap-highlight-color:transparent}
+    .app{max-width:720px;margin:auto;min-height:100vh;padding:max(18px,env(safe-area-inset-top)) 16px max(30px,env(safe-area-inset-bottom))}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{width:48px;height:48px;border-radius:16px;background:var(--accent);color:var(--accentText);display:grid;place-items:center;font-size:23px;box-shadow:0 12px 28px var(--shadow)}
+    h1{font-size:1.32rem;margin:0;letter-spacing:-.02em}
+    .sub{margin:3px 0 0;color:var(--muted);font-size:.85rem}
+    .themeBtn{min-width:52px;height:52px;border:1px solid var(--line);border-radius:17px;background:var(--surface);color:var(--text);font-size:22px;box-shadow:0 8px 20px var(--shadow)}
+    .card{background:var(--hero);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:0 18px 46px var(--shadow)}
+    .languageRow{display:grid;grid-template-columns:1fr 58px 1fr;gap:10px;align-items:center}
+    .langBtn{min-height:74px;text-align:left;border:1px solid var(--line);border-radius:18px;background:var(--surface);color:var(--text);padding:11px 13px;display:flex;align-items:center;gap:10px}
+    .flag{font-size:25px;line-height:1}.langMeta{min-width:0}.langLabel{font-size:.68rem;color:var(--muted);font-weight:800;letter-spacing:.06em}.langName{margin-top:3px;font-size:1rem;font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .swap{width:58px;height:58px;border:0;border-radius:18px;background:var(--surface2);color:var(--accent);font-size:25px;font-weight:900}
+    .micWrap{text-align:center;padding:34px 0 26px}
+    .mic{width:132px;height:132px;border-radius:50%;border:0;background:var(--accent);color:var(--accentText);font-size:48px;box-shadow:0 18px 42px var(--micShadow);transition:.2s}
+    .mic:active{transform:scale(.96)}
+    .mic.listening{background:#e53935;animation:pulse 1.65s infinite}
+    @keyframes pulse{0%,100%{box-shadow:0 0 0 8px rgba(229,57,53,.10),0 18px 42px rgba(229,57,53,.24)}50%{box-shadow:0 0 0 18px rgba(229,57,53,.04),0 18px 42px rgba(229,57,53,.24)}}
+    .status{margin-top:15px;color:var(--muted);font-size:.94rem;min-height:22px}
+    .liveDot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#e53935;margin-right:6px}
+    .engine{display:inline-flex;margin-top:9px;padding:6px 10px;border-radius:999px;background:var(--surface2);color:var(--accent);font-size:.72rem;font-weight:850}
+    .panel{border-top:1px solid var(--line);padding-top:18px;margin-top:6px}
+    .sectionTitle{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:.78rem;font-weight:900;letter-spacing:.06em;text-transform:uppercase}
+    .smallStatus{text-transform:none;letter-spacing:0;font-size:.72rem}
+    .textBox{min-height:104px;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:15px;margin-top:9px;line-height:1.55;color:var(--text);white-space:pre-wrap}
+    .placeholder{color:var(--muted)}
+    .actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:13px}
+    .btn{min-height:52px;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:16px;font-weight:850}
+    .btn.primary{background:var(--accent);color:var(--accentText);border-color:transparent}
+    .hint{text-align:center;color:var(--muted);font-size:.76rem;margin-top:17px}
+    .sheetBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:flex-end;z-index:30}
+    .sheetBackdrop.open{display:flex}
+    .sheet{width:100%;max-width:720px;margin:0 auto;background:var(--bg);color:var(--text);border-radius:28px 28px 0 0;padding:14px 14px max(22px,env(safe-area-inset-bottom));max-height:88vh;overflow:auto;box-shadow:0 -20px 50px rgba(0,0,0,.18)}
+    .sheetHandle{width:44px;height:5px;border-radius:10px;background:var(--line);margin:0 auto 14px}
+    .sheetHead{display:flex;align-items:center;justify-content:space-between;gap:10px}.sheetHead h2{font-size:1.15rem;margin:0}.closeBtn{width:46px;height:46px;border:0;border-radius:15px;background:var(--surface2);color:var(--text);font-size:22px}
+    .search{width:100%;height:52px;border:1px solid var(--line);border-radius:16px;background:var(--surface);color:var(--text);padding:0 15px;margin:14px 0;font-size:16px;outline:none}
+    .groupTitle{margin:17px 2px 8px;color:var(--muted);font-size:.74rem;font-weight:900;text-transform:uppercase;letter-spacing:.07em}
+    .langList{display:grid;gap:8px}
+    .langItem{display:grid;grid-template-columns:42px 1fr 48px;align-items:center;gap:8px;min-height:58px;border:1px solid var(--line);border-radius:16px;background:var(--surface);padding:6px 7px 6px 12px}
+    .langItemMain{border:0;background:transparent;color:var(--text);text-align:left;font-weight:820;padding:10px 0}
+    .starBtn{width:44px;height:44px;border:0;border-radius:13px;background:var(--surface2);color:var(--muted);font-size:20px}.starBtn.active{color:#e0a400}
+    .themeGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.themeChoice{min-height:76px;border:1px solid var(--line);border-radius:18px;background:var(--surface);color:var(--text);padding:12px;text-align:left;font-weight:900}.themeChoice small{display:block;color:var(--muted);font-weight:600;margin-top:4px}.themeChoice.active{outline:3px solid var(--accent)}
+    @media(max-width:520px){.app{padding-left:12px;padding-right:12px}.card{padding:14px}.languageRow{grid-template-columns:1fr 52px 1fr;gap:7px}.langBtn{min-height:78px;padding:10px}.swap{width:52px;height:58px}.mic{width:140px;height:140px}.actions{grid-template-columns:1fr 1fr}.btn:last-child{grid-column:1/-1}.themeGrid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
   <main class="app">
-    <div class="brand">
-      <div class="logo">🎙️</div>
-      <div>
-        <h1>Voice Translate</h1>
-        <p class="sub">High-accuracy live speech transcription and translation.</p>
-      </div>
+    <div class="topbar">
+      <div class="brand"><div class="logo">🎙️</div><div><h1>Voice Translate</h1><p class="sub">Speak naturally. Understand instantly.</p></div></div>
+      <button class="themeBtn" id="themeBtn" aria-label="Choose theme">◐</button>
     </div>
 
     <section class="card">
-      <div class="langs">
-        <div>
-          <div class="label">INPUT</div>
-          <select id="inputLang">
-            <option value="en-US">English</option>
-            <option value="nl-NL">Dutch</option>
-            <option value="fr-FR">French</option>
-            <option value="de-DE">German</option>
-            <option value="es-ES">Spanish</option>
-            <option value="it-IT">Italian</option>
-            <option value="hi-IN">Hindi</option>
-            <option value="ml-IN">Malayalam</option>
-            <option value="ta-IN">Tamil</option>
-          </select>
-        </div>
+      <div class="languageRow">
+        <button class="langBtn" id="inputPicker"><span class="flag" id="inputFlag">🇬🇧</span><span class="langMeta"><span class="langLabel">FROM</span><span class="langName" id="inputName">English</span></span></button>
         <button class="swap" id="swap" aria-label="Swap languages">⇄</button>
-        <div>
-          <div class="label">OUTPUT</div>
-          <select id="outputLang">
-            <option value="fr-FR">French</option>
-            <option value="en-US">English</option>
-            <option value="nl-NL">Dutch</option>
-            <option value="de-DE">German</option>
-            <option value="es-ES">Spanish</option>
-            <option value="it-IT">Italian</option>
-            <option value="hi-IN">Hindi</option>
-            <option value="ml-IN">Malayalam</option>
-            <option value="ta-IN">Tamil</option>
-          </select>
-        </div>
+        <button class="langBtn" id="outputPicker"><span class="flag" id="outputFlag">🇫🇷</span><span class="langMeta"><span class="langLabel">TO</span><span class="langName" id="outputName">French</span></span></button>
       </div>
+      <input type="hidden" id="inputLang" value="en-US" />
+      <input type="hidden" id="outputLang" value="fr-FR" />
 
       <div class="micWrap">
         <button class="mic" id="mic" aria-label="Start listening">🎤</button>
@@ -93,30 +90,14 @@
         <div class="engine" id="engineBadge">Realtime Whisper</div>
       </div>
 
-      <div class="panel">
-        <div class="sectionTitle">
-          <span>Live transcription</span>
-          <span class="smallStatus" id="speechState"></span>
-        </div>
-        <div class="textBox placeholder" id="transcript">Your speech will appear here.</div>
-      </div>
-
-      <div class="panel">
-        <div class="sectionTitle">
-          <span>Live translation</span>
-          <span class="smallStatus" id="translationState"></span>
-        </div>
-        <div class="textBox placeholder" id="translation">Your translation will appear here.</div>
-        <div class="actions">
-          <button class="btn" id="copy">Copy</button>
-          <button class="btn primary" id="speak">🔊 Speak</button>
-          <button class="btn" id="clear">Clear</button>
-        </div>
-      </div>
+      <div class="panel"><div class="sectionTitle"><span>Live transcription</span><span class="smallStatus" id="speechState"></span></div><div class="textBox placeholder" id="transcript">Your speech will appear here.</div></div>
+      <div class="panel"><div class="sectionTitle"><span>Live translation</span><span class="smallStatus" id="translationState"></span></div><div class="textBox placeholder" id="translation">Your translation will appear here.</div><div class="actions"><button class="btn" id="copy">Copy</button><button class="btn primary" id="speak">🔊 Speak</button><button class="btn" id="clear">Clear</button></div></div>
     </section>
-
-    <div class="hint">Realtime Whisper transcription • GPT translation • no sign-in</div>
+    <div class="hint">Realtime speech • AI translation • no sign-in</div>
   </main>
+
+  <div class="sheetBackdrop" id="languageSheet" aria-hidden="true"><div class="sheet"><div class="sheetHandle"></div><div class="sheetHead"><h2 id="sheetTitle">Choose language</h2><button class="closeBtn" data-close="languageSheet">×</button></div><input class="search" id="languageSearch" type="search" placeholder="Search languages…" autocomplete="off"/><div id="languageResults"></div></div></div>
+  <div class="sheetBackdrop" id="themeSheet" aria-hidden="true"><div class="sheet"><div class="sheetHandle"></div><div class="sheetHead"><h2>Choose your look</h2><button class="closeBtn" data-close="themeSheet">×</button></div><div class="themeGrid" id="themeGrid"></div></div></div>
 
   <script type="module" src="/src/main.js"></script>
 </body>
