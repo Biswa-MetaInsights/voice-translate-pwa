@@ -9,82 +9,105 @@ const LANGUAGES = {
   'kn-IN':'Kannada'
 };
 
+const LIMIT_WINDOW_MS = 60_000;
+const LIMIT_REQUESTS = 60;
+const buckets = globalThis.__voiceTranslateRateBuckets || new Map();
+globalThis.__voiceTranslateRateBuckets = buckets;
+
+function clientKey(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  const ip = Array.isArray(forwarded) ? forwarded[0] : String(forwarded || '').split(',')[0].trim();
+  return ip || req.socket?.remoteAddress || 'unknown';
+}
+
+function allowed(req) {
+  const now = Date.now();
+  const key = clientKey(req);
+  const current = buckets.get(key);
+  if (!current || now - current.startedAt >= LIMIT_WINDOW_MS) {
+    buckets.set(key, { startedAt: now, count: 1 });
+    return true;
+  }
+  current.count += 1;
+  return current.count <= LIMIT_REQUESTS;
+}
+
+async function gatewayTranslate(token, model, source, target, text) {
+  const response = await fetch('https://ai-gateway.vercel.sh/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    signal: AbortSignal.timeout(12_000),
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: `Translate from ${source} to ${target}. Return only the natural translation. Preserve meaning, names, numbers, tone, and punctuation. Do not explain, label, or add content. If the text is an unfinished live-speech fragment, translate only what is present.`
+        },
+        { role: 'user', content: text }
+      ],
+      stream: false
+    })
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = payload?.error?.message || payload?.error || `Gateway HTTP ${response.status}`;
+    throw new Error(String(message));
+  }
+
+  const translation = payload?.choices?.[0]?.message?.content?.trim();
+  if (!translation) throw new Error('No translation returned');
+  return translation;
+}
+
 export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  if (!allowed(req)) {
+    res.setHeader('Retry-After', '60');
+    return res.status(429).json({ error: 'Too many translation requests. Please wait a moment.' });
   }
 
   try {
     const { text, sourceLanguage, targetLanguage } = req.body ?? {};
     const source = LANGUAGES[sourceLanguage];
     const target = LANGUAGES[targetLanguage];
+    const clean = typeof text === 'string' ? text.trim() : '';
 
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ error: 'Text is required' });
-    }
-    if (!source || !target) {
-      return res.status(400).json({ error: 'Unsupported language' });
-    }
-    if (text.length > 5000) {
-      return res.status(413).json({ error: 'Text is too long' });
-    }
-    if (sourceLanguage === targetLanguage) {
-      return res.status(200).json({ translation: text });
-    }
+    if (!clean) return res.status(400).json({ error: 'Text is required' });
+    if (!source || !target) return res.status(400).json({ error: 'Unsupported language' });
+    if (clean.length > 3000) return res.status(413).json({ error: 'Text is too long' });
+    if (sourceLanguage === targetLanguage) return res.status(200).json({ translation: clean });
 
     const token = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
     if (!token) {
       console.error('No AI Gateway authentication token available');
-      return res.status(500).json({ error: 'AI Gateway authentication is not configured' });
+      return res.status(503).json({ error: 'Translation service is temporarily unavailable' });
     }
 
-    const gatewayResponse = await fetch('https://ai-gateway.vercel.sh/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'openai/gpt-5.6-sol',
-        messages: [
-          {
-            role: 'system',
-            content: `You are a fast, precise live speech translator. Translate from ${source} to ${target}. Return only the translation. Preserve meaning, names, numbers, tone, and natural punctuation. Do not explain or add labels. If the source is an unfinished live-speech fragment, translate only what is present without inventing missing content.`
-          },
-          {
-            role: 'user',
-            content: text
-          }
-        ],
-        stream: false
-      })
-    });
-
-    const payload = await gatewayResponse.json().catch(() => ({}));
-
-    if (!gatewayResponse.ok) {
-      const gatewayMessage = payload?.error?.message || payload?.error || `Gateway HTTP ${gatewayResponse.status}`;
-      console.error('AI Gateway error:', gatewayResponse.status, gatewayMessage);
-      return res.status(502).json({
-        error: 'AI translation service failed',
-        code: gatewayResponse.status,
-        detail: String(gatewayMessage).slice(0, 300)
-      });
-    }
-
-    const translation = payload?.choices?.[0]?.message?.content?.trim();
-    if (!translation) {
-      console.error('AI Gateway returned no translation', payload);
-      return res.status(502).json({ error: 'AI translation returned no text' });
+    let translation;
+    try {
+      translation = await gatewayTranslate(token, 'openai/gpt-5.4-nano', source, target, clean);
+    } catch (primaryError) {
+      console.warn('Primary translation model failed, retrying once:', primaryError?.message);
+      translation = await gatewayTranslate(token, 'openai/gpt-5.6-sol', source, target, clean);
     }
 
     return res.status(200).json({ translation });
   } catch (error) {
     console.error('Translation failed:', error);
-    return res.status(500).json({
-      error: 'Translation failed',
-      detail: String(error?.message || error).slice(0, 300)
+    const timeout = error?.name === 'TimeoutError' || /timeout/i.test(String(error?.message || ''));
+    return res.status(timeout ? 504 : 502).json({
+      error: timeout ? 'Translation timed out. Please try again.' : 'Translation temporarily unavailable'
     });
   }
 }
