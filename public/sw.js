@@ -1,5 +1,5 @@
-const CACHE = "voice-translate-v4";
-const ASSETS = ["/", "/index.html", "/manifest.webmanifest"];
+const CACHE = "voice-translate-v5";
+const ASSETS = ["/", "/index.html", "/install.html", "/manifest.webmanifest", "/icon.svg", "/icon-maskable.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));
