@@ -70,6 +70,9 @@ let isListening=false, committedTranscript='', interimTranscript='';
 let audioController=null, mediaStream=null, audioContext=null, sourceNode=null, processorNode=null, muteNode=null;
 let translateTimer=null, translateController=null, translateSequence=0, lastRequestedText='', transcriptionSession=0;
 let pickerTarget='input';
+let wantsListening=false, reconnectAttempts=0, reconnectTimer=null, sessionLimitTimer=null;
+const MAX_SESSION_MS=30*60*1000;
+const MAX_RECONNECTS=3;
 
 const store={
   get(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}},
@@ -191,37 +194,142 @@ async function createMicrophonePcmStream(){
   sourceNode.connect(processorNode);processorNode.connect(muteNode);muteNode.connect(audioContext.destination);return pcmStream;
 }
 
-async function startListening(){
-  if(isListening)return;if(!navigator.mediaDevices?.getUserMedia){statusEl.textContent='Microphone capture is not supported in this browser.';return}
-  const sessionId=++transcriptionSession;isListening=true;mic.classList.add('listening');mic.setAttribute('aria-label','Stop listening');mic.textContent='■';statusEl.innerHTML='<span class="liveDot"></span>Starting high-accuracy transcription…';speechState.textContent='Connecting';
+async function cleanupAudio(){
+  isListening=false;
+  if(processorNode){processorNode.onaudioprocess=null;try{processorNode.disconnect()}catch{}}
+  if(sourceNode){try{sourceNode.disconnect()}catch{}}
+  if(muteNode){try{muteNode.disconnect()}catch{}}
+  if(audioController){try{audioController.close()}catch{}audioController=null}
+  if(mediaStream){mediaStream.getTracks().forEach(t=>t.stop());mediaStream=null}
+  if(audioContext){try{await audioContext.close()}catch{}audioContext=null}
+  sourceNode=processorNode=muteNode=null;
+}
+
+function scheduleReconnect(){
+  if(!wantsListening)return;
+  if(!navigator.onLine){
+    speechState.textContent='Waiting for internet';
+    statusEl.textContent='Connection lost — listening will resume automatically';
+    return;
+  }
+  if(reconnectAttempts>=MAX_RECONNECTS){
+    wantsListening=false;
+    mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');
+    speechState.textContent='Disconnected';
+    statusEl.textContent='Could not reconnect. Tap the microphone to try again.';
+    return;
+  }
+  reconnectAttempts+=1;
+  speechState.textContent='Reconnecting…';
+  statusEl.textContent='Restoring microphone connection…';
+  clearTimeout(reconnectTimer);
+  reconnectTimer=setTimeout(()=>startListening(true),Math.min(600*reconnectAttempts,1800));
+}
+
+async function startListening(isReconnect=false){
+  if(isListening||!wantsListening)return;
+  if(!navigator.mediaDevices?.getUserMedia){wantsListening=false;statusEl.textContent='Microphone capture is not supported in this browser.';return}
+  if(!navigator.onLine){scheduleReconnect();return}
+
+  const sessionId=++transcriptionSession;
+  isListening=true;
+  mic.classList.add('listening');mic.setAttribute('aria-label','Stop listening');mic.textContent='■';
+  statusEl.innerHTML='<span class="liveDot"></span>'+(isReconnect?'Reconnecting…':'Starting microphone…');
+  speechState.textContent=isReconnect?'Reconnecting…':'Connecting';
+
+  if(!isReconnect){
+    reconnectAttempts=0;
+    clearTimeout(sessionLimitTimer);
+    sessionLimitTimer=setTimeout(async()=>{
+      if(!wantsListening)return;
+      await stopListening(true);
+      statusEl.textContent='30-minute session finished. Tap the microphone to start a new session.';
+    },MAX_SESSION_MS);
+  }
+
   try{
-    const tokenResponse=await fetch('/api/transcription-token',{method:'POST'});const tokenData=await tokenResponse.json().catch(()=>({}));if(!tokenResponse.ok||!tokenData.token)throw new Error(tokenData.detail||tokenData.error||'Could not authorize transcription');
-    if(!isListening||sessionId!==transcriptionSession)return;
-    const microphoneStream=await createMicrophonePcmStream();const gateway=createGateway({apiKey:tokenData.token});
-    const result=streamTranscribe({model:gateway.transcriptionModel('openai/gpt-realtime-whisper'),audio:microphoneStream,inputAudioFormat:{type:'audio/pcm',rate:24000}});
-    statusEl.innerHTML='<span class="liveDot"></span>Listening — tap again to stop';speechState.textContent='Listening';noteUse(input.value);
+    const tokenResponse=await fetch('/api/transcription-token',{method:'POST'});
+    const tokenData=await tokenResponse.json().catch(()=>({}));
+    if(!tokenResponse.ok||!tokenData.token)throw new Error(tokenData.error||'Speech service unavailable');
+    if(!wantsListening||sessionId!==transcriptionSession)return;
+
+    const microphoneStream=await createMicrophonePcmStream();
+    const gateway=createGateway({apiKey:tokenData.token});
+    const result=streamTranscribe({
+      model:gateway.transcriptionModel('openai/gpt-realtime-whisper'),
+      audio:microphoneStream,
+      inputAudioFormat:{type:'audio/pcm',rate:24000}
+    });
+
+    reconnectAttempts=0;
+    statusEl.innerHTML='<span class="liveDot"></span>Listening — tap again to stop';
+    speechState.textContent='Listening';
+    noteUse(input.value);
+
     for await(const part of result.fullStream){
-      if(!isListening||sessionId!==transcriptionSession)break;
-      if(part.type==='transcript-delta'){interimTranscript+=part.delta||'';const visible=currentTranscript();setTranscript(visible);speechState.textContent='Hearing you…';scheduleTranslation(visible)}
-      if(part.type==='transcript-final'){const finalText=normalizeSpaces(part.text||interimTranscript);if(finalText)committedTranscript=normalizeSpaces(committedTranscript+' '+finalText);interimTranscript='';const visible=currentTranscript();setTranscript(visible);speechState.textContent='Captured';scheduleTranslation(visible,true)}
-      if(part.type==='error')throw new Error(part.error?.message||part.message||'Realtime transcription error');
+      if(!wantsListening||sessionId!==transcriptionSession)break;
+      if(part.type==='transcript-delta'){
+        interimTranscript+=part.delta||'';
+        const visible=currentTranscript();setTranscript(visible);
+        speechState.textContent='Hearing you…';scheduleTranslation(visible);
+      }
+      if(part.type==='transcript-final'){
+        const finalText=normalizeSpaces(part.text||interimTranscript);
+        if(finalText)committedTranscript=normalizeSpaces(committedTranscript+' '+finalText);
+        interimTranscript='';
+        const visible=currentTranscript();setTranscript(visible);
+        speechState.textContent='Captured';scheduleTranslation(visible,true);
+      }
+      if(part.type==='error')throw new Error(part.error?.message||part.message||'Speech connection interrupted');
     }
-  }catch(error){if(sessionId!==transcriptionSession)return;console.error(error);statusEl.textContent='Listening error: '+(error.message||'Could not start transcription');speechState.textContent='Error';await stopListening(false)}
+
+    if(wantsListening&&sessionId===transcriptionSession){
+      await cleanupAudio();
+      scheduleReconnect();
+    }
+  }catch(error){
+    if(sessionId!==transcriptionSession)return;
+    console.error('Speech session error:',error);
+    await cleanupAudio();
+    if(wantsListening)scheduleReconnect();
+  }
 }
 
 async function stopListening(updateUi=true){
-  if(!isListening&&!mediaStream&&!audioContext)return;isListening=false;++transcriptionSession;
-  if(processorNode){processorNode.onaudioprocess=null;try{processorNode.disconnect()}catch{}}if(sourceNode){try{sourceNode.disconnect()}catch{}}if(muteNode){try{muteNode.disconnect()}catch{}}
-  if(audioController){try{audioController.close()}catch{}audioController=null}if(mediaStream){mediaStream.getTracks().forEach(t=>t.stop());mediaStream=null}if(audioContext){try{await audioContext.close()}catch{}audioContext=null}
-  sourceNode=processorNode=muteNode=null;mic.classList.remove('listening');mic.setAttribute('aria-label','Start listening');mic.textContent='🎤';
-  if(updateUi){speechState.textContent=committedTranscript?'Stopped':'';statusEl.textContent='Stopped — tap the microphone to continue';const text=currentTranscript();if(text)scheduleTranslation(text,true)}
+  wantsListening=false;
+  clearTimeout(reconnectTimer);clearTimeout(sessionLimitTimer);
+  ++transcriptionSession;
+  await cleanupAudio();
+  mic.classList.remove('listening');mic.setAttribute('aria-label','Start listening');mic.textContent='🎤';
+  if(updateUi){
+    speechState.textContent=committedTranscript?'Stopped':'';
+    statusEl.textContent='Stopped — tap the microphone to continue';
+    const text=currentTranscript();if(text)scheduleTranslation(text,true);
+  }
 }
 
-mic.onclick=async()=>{if(isListening)await stopListening(true);else await startListening()};
+mic.onclick=async()=>{
+  if(wantsListening){await stopListening(true);return}
+  wantsListening=true;
+  reconnectAttempts=0;
+  await startListening(false);
+};
 document.getElementById('swap').onclick=async()=>{const was=isListening;if(was)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);const text=currentTranscript();if(text){lastRequestedText='';scheduleTranslation(text,true)}if(was)await startListening()};
 document.getElementById('clear').onclick=()=>{committedTranscript='';interimTranscript='';lastRequestedText='';++translateSequence;clearTimeout(translateTimer);if(translateController)translateController.abort();setTranscript('');setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
 copyBtn.onclick=async()=>{if(translationEl.classList.contains('placeholder'))return;try{await navigator.clipboard.writeText(translationEl.textContent);statusEl.textContent='Translation copied'}catch{statusEl.textContent='Copy failed'}};
 speakBtn.onclick=()=>{if(translationEl.classList.contains('placeholder'))return;const u=new SpeechSynthesisUtterance(translationEl.textContent);u.lang=output.value;speechSynthesis.cancel();speechSynthesis.speak(u)};
+window.addEventListener('offline',()=>{
+  if(wantsListening){
+    statusEl.textContent='Connection lost — listening will resume automatically';
+    speechState.textContent='Waiting for internet';
+  }else{
+    statusEl.textContent='You are offline. Internet is required for speech and translation.';
+  }
+});
+window.addEventListener('online',()=>{
+  if(wantsListening&&!isListening){reconnectAttempts=0;scheduleReconnect()}
+  else if(!wantsListening)statusEl.textContent='Back online — ready to listen';
+});
 window.addEventListener('beforeunload',()=>{if(mediaStream)mediaStream.getTracks().forEach(t=>t.stop())});
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'));
 
