@@ -1,7 +1,7 @@
 {
   "name": "voice-translate-pwa",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "ai": "^5.0.0"
+    "@ai-sdk/gateway": "^4.0.23",
+    "ai": "^7.0.31"
   },
   "devDependencies": {
     "vite": "^7.1.7"
