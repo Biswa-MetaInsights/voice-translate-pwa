@@ -143,12 +143,12 @@ function renderLanguagePicker(query=''){
 }
 
 async function selectLanguage(code){
-  const wasListening=isListening;
-  if(wasListening&&pickerTarget==='input')await stopListening(false);
+  const resumeListening=wantsListening&&pickerTarget==='input';
+  if(resumeListening)await stopListening(false);
   if(pickerTarget==='input')input.value=code;else output.value=code;
   noteUse(code);updateLanguageButtons();closeSheet('languageSheet');
   const text=currentTranscript();if(text){lastRequestedText='';scheduleTranslation(text,true)}
-  if(wasListening&&pickerTarget==='input')await startListening();
+  if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}
 }
 
 function launchLanguagePicker(target){
@@ -314,7 +314,7 @@ mic.onclick=async()=>{
   reconnectAttempts=0;
   await startListening(false);
 };
-document.getElementById('swap').onclick=async()=>{const was=isListening;if(was)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);const text=currentTranscript();if(text){lastRequestedText='';scheduleTranslation(text,true)}if(was)await startListening()};
+document.getElementById('swap').onclick=async()=>{const resumeListening=wantsListening;if(resumeListening)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);const text=currentTranscript();if(text){lastRequestedText='';scheduleTranslation(text,true)}if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}};
 document.getElementById('clear').onclick=()=>{committedTranscript='';interimTranscript='';lastRequestedText='';++translateSequence;clearTimeout(translateTimer);if(translateController)translateController.abort();setTranscript('');setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
 copyBtn.onclick=async()=>{if(translationEl.classList.contains('placeholder'))return;try{await navigator.clipboard.writeText(translationEl.textContent);statusEl.textContent='Translation copied'}catch{statusEl.textContent='Copy failed'}};
 speakBtn.onclick=()=>{if(translationEl.classList.contains('placeholder'))return;const u=new SpeechSynthesisUtterance(translationEl.textContent);u.lang=output.value;speechSynthesis.cancel();speechSynthesis.speak(u)};
