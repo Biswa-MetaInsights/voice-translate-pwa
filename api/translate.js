@@ -1,5 +1,3 @@
-import { generateText } from 'ai';
-
 const LANGUAGES = {
   'en-US': 'English',
   'nl-NL': 'Dutch',
@@ -36,18 +34,58 @@ export default async function handler(req, res) {
       return res.status(200).json({ translation: text });
     }
 
-    const result = await generateText({
-      model: 'openai/gpt-5.4-nano',
-      system: `You are a fast, precise live speech translator. Translate from ${source} to ${target}. Return only the translation. Preserve meaning, names, numbers, tone, and natural punctuation. Do not explain or add labels. If the source is an unfinished live-speech fragment, translate the fragment naturally without inventing missing content.`,
-      prompt: text
+    const token = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
+    if (!token) {
+      console.error('No AI Gateway authentication token available');
+      return res.status(500).json({ error: 'AI Gateway authentication is not configured' });
+    }
+
+    const gatewayResponse = await fetch('https://ai-gateway.vercel.sh/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-5.6-sol',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a fast, precise live speech translator. Translate from ${source} to ${target}. Return only the translation. Preserve meaning, names, numbers, tone, and natural punctuation. Do not explain or add labels. If the source is an unfinished live-speech fragment, translate only what is present without inventing missing content.`
+          },
+          {
+            role: 'user',
+            content: text
+          }
+        ],
+        stream: false
+      })
     });
 
-    return res.status(200).json({ translation: result.text.trim() });
+    const payload = await gatewayResponse.json().catch(() => ({}));
+
+    if (!gatewayResponse.ok) {
+      const gatewayMessage = payload?.error?.message || payload?.error || `Gateway HTTP ${gatewayResponse.status}`;
+      console.error('AI Gateway error:', gatewayResponse.status, gatewayMessage);
+      return res.status(502).json({
+        error: 'AI translation service failed',
+        code: gatewayResponse.status,
+        detail: String(gatewayMessage).slice(0, 300)
+      });
+    }
+
+    const translation = payload?.choices?.[0]?.message?.content?.trim();
+    if (!translation) {
+      console.error('AI Gateway returned no translation', payload);
+      return res.status(502).json({ error: 'AI translation returned no text' });
+    }
+
+    return res.status(200).json({ translation });
   } catch (error) {
     console.error('Translation failed:', error);
     return res.status(500).json({
       error: 'Translation failed',
-      detail: process.env.NODE_ENV === 'development' ? String(error) : undefined
+      detail: String(error?.message || error).slice(0, 300)
     });
   }
 }
