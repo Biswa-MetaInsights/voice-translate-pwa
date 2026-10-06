@@ -1,0 +1,11 @@
+{
+  "name": "Voice Translate",
+  "short_name": "VoiceTranslate",
+  "description": "Simple voice-to-text and voice translation PWA.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "orientation": "portrait-primary",
+  "lang": "en"
+}
