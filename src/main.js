@@ -65,12 +65,39 @@ const input=document.getElementById('inputLang');
 const output=document.getElementById('outputLang');
 const copyBtn=document.getElementById('copy');
 const speakBtn=document.getElementById('speak');
+const diagnosticEl=document.getElementById('diagnostic');
+const diagnosticBody=document.getElementById('diagnosticBody');
 
 let isListening=false, committedTranscript='', interimTranscript='';
 let audioController=null, mediaStream=null, audioContext=null, sourceNode=null, processorNode=null, muteNode=null;
 let translateTimer=null, translateController=null, translateSequence=0, lastRequestedText='', transcriptionSession=0;
 let pickerTarget='input';
 let wantsListening=false, reconnectAttempts=0, reconnectTimer=null, sessionLimitTimer=null;
+let diagnosticState={network:'idle',token:'idle',microphone:'idle',realtime:'idle',fallback:'idle',error:''};
+
+function renderDiagnostics(){
+  if(!diagnosticEl||!diagnosticBody)return;
+  const icon=(v)=>v==='ok'?'✓':v==='pending'?'…':v==='error'?'✕':'–';
+  diagnosticEl.classList.add('show');
+  diagnosticBody.innerHTML=
+    'Network '+icon(diagnosticState.network)+' · '+
+    'Token '+icon(diagnosticState.token)+' · '+
+    'Microphone '+icon(diagnosticState.microphone)+' · '+
+    'Realtime '+icon(diagnosticState.realtime)+' · '+
+    'Fallback '+icon(diagnosticState.fallback)+
+    (diagnosticState.error?'<div class="diagError">Last failure: '+diagnosticState.error.replace(/[<>&]/g,'')+'</div>':'');
+}
+
+function setDiagnostic(key,value,error=''){
+  diagnosticState[key]=value;
+  if(error)diagnosticState.error=String(error).slice(0,180);
+  renderDiagnostics();
+}
+
+function resetDiagnostics(){
+  diagnosticState={network:navigator.onLine?'ok':'error',token:'idle',microphone:'idle',realtime:'idle',fallback:'idle',error:''};
+  renderDiagnostics();
+}
 let browserRecognition=null, usingBrowserFallback=false;
 const MAX_SESSION_MS=30*60*1000;
 const MAX_RECONNECTS=2;
@@ -211,13 +238,14 @@ function browserSpeechSupported(){
 }
 
 function startBrowserFallback(){
-  if(!wantsListening||usingBrowserFallback||!browserSpeechSupported())return false;
+  if(!wantsListening||usingBrowserFallback||!browserSpeechSupported()){setDiagnostic('fallback','error','Browser speech fallback unavailable');return false;}
   const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
   browserRecognition=new Recognition();
   browserRecognition.continuous=true;
   browserRecognition.interimResults=true;
   browserRecognition.lang=input.value;
   usingBrowserFallback=true;
+  setDiagnostic('fallback','ok');
 
   speechState.textContent='Listening';
   statusEl.innerHTML='<span class="liveDot"></span>Listening — compatibility mode';
@@ -264,6 +292,7 @@ function startBrowserFallback(){
     console.warn('Could not start browser fallback:',error);
     usingBrowserFallback=false;
     browserRecognition=null;
+    setDiagnostic('fallback','error',error?.message||'Browser fallback failed');
     return false;
   }
 }
@@ -301,7 +330,8 @@ function scheduleReconnect(){
 async function startListening(isReconnect=false){
   if(isListening||!wantsListening)return;
   if(!navigator.mediaDevices?.getUserMedia){wantsListening=false;statusEl.textContent='Microphone capture is not supported in this browser.';return}
-  if(!navigator.onLine){scheduleReconnect();return}
+  if(!navigator.onLine){setDiagnostic('network','error','Device is offline');scheduleReconnect();return}
+  setDiagnostic('network','ok');
 
   const sessionId=++transcriptionSession;
   isListening=true;
@@ -319,14 +349,22 @@ async function startListening(isReconnect=false){
     },MAX_SESSION_MS);
   }
 
+  let failureStage='token';
   try{
+    setDiagnostic('token','pending');
     const tokenResponse=await fetch('/api/transcription-token',{method:'POST'});
     const tokenData=await tokenResponse.json().catch(()=>({}));
-    if(!tokenResponse.ok||!tokenData.token)throw new Error(tokenData.error||'Speech service unavailable');
+    if(!tokenResponse.ok||!tokenData.token)throw new Error((tokenData.error||'Speech service unavailable')+' (HTTP '+tokenResponse.status+')');
+    setDiagnostic('token','ok');
     if(!wantsListening||sessionId!==transcriptionSession)return;
 
+    failureStage='microphone';
+    setDiagnostic('microphone','pending');
     const microphoneStream=await createMicrophonePcmStream();
+    setDiagnostic('microphone','ok');
     const gateway=createGateway({apiKey:tokenData.token});
+    failureStage='realtime';
+    setDiagnostic('realtime','pending');
     const result=streamTranscribe({
       model:gateway.transcriptionModel('openai/gpt-realtime-whisper'),
       audio:microphoneStream,
@@ -334,11 +372,13 @@ async function startListening(isReconnect=false){
     });
 
     reconnectAttempts=0;
+    let receivedRealtimeEvent=false;
     statusEl.innerHTML='<span class="liveDot"></span>Listening — tap again to stop';
     speechState.textContent='Listening';
     noteUse(input.value);
 
     for await(const part of result.fullStream){
+      if(!receivedRealtimeEvent){receivedRealtimeEvent=true;setDiagnostic('realtime','ok')}
       if(!wantsListening||sessionId!==transcriptionSession)break;
       if(part.type==='transcript-delta'){
         interimTranscript+=part.delta||'';
@@ -356,12 +396,14 @@ async function startListening(isReconnect=false){
     }
 
     if(wantsListening&&sessionId===transcriptionSession){
+      if(!receivedRealtimeEvent)setDiagnostic('realtime','error','Realtime stream ended before any transcript event');
       await cleanupAudio();
       scheduleReconnect();
     }
   }catch(error){
     if(sessionId!==transcriptionSession)return;
     console.error('Speech session error:',error);
+    setDiagnostic(failureStage,'error',error?.message||'Unknown speech error');
     await cleanupAudio();
 
     const name=error?.name||'';
@@ -417,6 +459,7 @@ mic.onclick=async()=>{
   wantsListening=true;
   usingBrowserFallback=false;
   reconnectAttempts=0;
+  resetDiagnostics();
   await startListening(false);
 };
 document.getElementById('swap').onclick=async()=>{const resumeListening=wantsListening;if(resumeListening)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);const text=currentTranscript();if(text){lastRequestedText='';scheduleTranslation(text,true)}if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}};
@@ -424,6 +467,7 @@ document.getElementById('clear').onclick=()=>{committedTranscript='';interimTran
 copyBtn.onclick=async()=>{if(translationEl.classList.contains('placeholder'))return;try{await navigator.clipboard.writeText(translationEl.textContent);statusEl.textContent='Translation copied'}catch{statusEl.textContent='Copy failed'}};
 speakBtn.onclick=()=>{if(translationEl.classList.contains('placeholder'))return;const u=new SpeechSynthesisUtterance(translationEl.textContent);u.lang=output.value;speechSynthesis.cancel();speechSynthesis.speak(u)};
 window.addEventListener('offline',()=>{
+  setDiagnostic('network','error','Device went offline');
   if(wantsListening){
     statusEl.textContent='Connection lost — listening will resume automatically';
     speechState.textContent='Waiting for internet';
@@ -432,6 +476,7 @@ window.addEventListener('offline',()=>{
   }
 });
 window.addEventListener('online',()=>{
+  setDiagnostic('network','ok');
   if(wantsListening&&!isListening){reconnectAttempts=0;scheduleReconnect()}
   else if(!wantsListening)statusEl.textContent='Back online — ready to listen';
 });
