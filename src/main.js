@@ -354,7 +354,7 @@ async function startListening(isReconnect=false){
     setDiagnostic('token','pending');
     const tokenResponse=await fetch('/api/transcription-token',{method:'POST'});
     const tokenData=await tokenResponse.json().catch(()=>({}));
-    if(!tokenResponse.ok||!tokenData.token)throw new Error((tokenData.error||'Speech service unavailable')+' (HTTP '+tokenResponse.status+')');
+    if(!tokenResponse.ok||!tokenData.token){const detail=tokenData.detail?': '+tokenData.detail:'';throw new Error((tokenData.error||'Speech service unavailable')+detail+' (HTTP '+tokenResponse.status+')');}
     setDiagnostic('token','ok');
     if(!wantsListening||sessionId!==transcriptionSession)return;
 
