@@ -1,4 +1,4 @@
-const CACHE = "voice-translate-v6";
+const CACHE = "voice-translate-v7";
 const ASSETS = ["/", "/index.html", "/install.html", "/privacy.html", "/manifest.webmanifest", "/icon.svg", "/icon-maskable.svg"];
 
 self.addEventListener("install", (event) => {
