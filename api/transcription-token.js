@@ -1,4 +1,4 @@
-import { gateway } from '@ai-sdk/gateway';
+import { createGateway } from '@ai-sdk/gateway';
 
 const WINDOW_MS = 60_000;
 const MAX_TOKENS_PER_MINUTE = 12;
@@ -37,6 +37,13 @@ export default async function handler(req, res) {
   }
 
   try {
+    const apiKey = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
+    if (!apiKey) {
+      console.error('AI Gateway authentication is unavailable for transcription token');
+      return res.status(503).json({ error: 'Speech service authentication is unavailable' });
+    }
+
+    const gateway = createGateway({ apiKey });
     const { token, url } = await gateway.experimental_transcription.getToken({
       model: 'openai/gpt-realtime-whisper',
     });
