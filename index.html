@@ -45,7 +45,7 @@
     @keyframes pulse{0%,100%{box-shadow:0 0 0 8px rgba(229,57,53,.10),0 18px 42px rgba(229,57,53,.24)}50%{box-shadow:0 0 0 18px rgba(229,57,53,.04),0 18px 42px rgba(229,57,53,.24)}}
     .status{margin-top:15px;color:var(--muted);font-size:.94rem;min-height:22px}
     .liveDot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#e53935;margin-right:6px}
-    .engine{display:inline-flex;margin-top:9px;padding:6px 10px;border-radius:999px;background:var(--surface2);color:var(--accent);font-size:.72rem;font-weight:850}
+    .engine{display:inline-flex;margin-top:9px;padding:6px 10px;border-radius:999px;background:var(--surface2);color:var(--accent);font-size:.72rem;font-weight:850}.diagnostic{display:none;margin:12px auto 0;max-width:440px;text-align:left;background:var(--surface2);border:1px solid var(--line);border-radius:15px;padding:11px 12px;font-size:.72rem;line-height:1.55;color:var(--muted)}.diagnostic.show{display:block}.diagTitle{font-weight:900;color:var(--text);margin-bottom:4px}.diagError{color:#c62828;font-weight:750;word-break:break-word}
     .panel{border-top:1px solid var(--line);padding-top:18px;margin-top:6px}
     .sectionTitle{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:.78rem;font-weight:900;letter-spacing:.06em;text-transform:uppercase}
     .smallStatus{text-transform:none;letter-spacing:0;font-size:.72rem}
@@ -89,7 +89,7 @@
       <div class="micWrap">
         <button class="mic" id="mic" aria-label="Start listening">🎤</button>
         <div class="status" id="status">Tap the microphone and start speaking</div>
-        <div class="engine" id="engineBadge">Ready to listen</div>
+        <div class="engine" id="engineBadge">Ready to listen</div><div class="diagnostic" id="diagnostic"><div class="diagTitle">Speech diagnostics</div><div id="diagnosticBody">Waiting for microphone test.</div></div>
       </div>
 
       <div class="panel"><div class="sectionTitle"><span>Live transcription</span><span class="smallStatus" id="speechState"></span></div><div class="textBox placeholder" id="transcript">Your speech will appear here.</div></div>
