@@ -291,6 +291,37 @@ async function startListening(isReconnect=false){
     if(sessionId!==transcriptionSession)return;
     console.error('Speech session error:',error);
     await cleanupAudio();
+
+    const name=error?.name||'';
+    const message=String(error?.message||'').toLowerCase();
+    const permissionDenied =
+      name==='NotAllowedError' ||
+      name==='SecurityError' ||
+      message.includes('permission') ||
+      message.includes('not allowed');
+
+    const noMic =
+      name==='NotFoundError' ||
+      message.includes('no microphone') ||
+      message.includes('requested device not found');
+
+    if(permissionDenied){
+      wantsListening=false;
+      clearTimeout(reconnectTimer);
+      mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');
+      speechState.textContent='Microphone blocked';
+      statusEl.textContent='Microphone access is blocked. On iPhone, open this page in Safari and allow microphone access.';
+      return;
+    }
+
+    if(noMic){
+      wantsListening=false;
+      mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');
+      speechState.textContent='No microphone';
+      statusEl.textContent='No microphone was found on this device.';
+      return;
+    }
+
     if(wantsListening)scheduleReconnect();
   }
 }
