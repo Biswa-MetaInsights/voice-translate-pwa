@@ -71,8 +71,9 @@ let audioController=null, mediaStream=null, audioContext=null, sourceNode=null, 
 let translateTimer=null, translateController=null, translateSequence=0, lastRequestedText='', transcriptionSession=0;
 let pickerTarget='input';
 let wantsListening=false, reconnectAttempts=0, reconnectTimer=null, sessionLimitTimer=null;
+let browserRecognition=null, usingBrowserFallback=false;
 const MAX_SESSION_MS=30*60*1000;
-const MAX_RECONNECTS=3;
+const MAX_RECONNECTS=2;
 
 const store={
   get(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}},
@@ -205,6 +206,76 @@ async function cleanupAudio(){
   sourceNode=processorNode=muteNode=null;
 }
 
+function browserSpeechSupported(){
+  return Boolean(window.SpeechRecognition||window.webkitSpeechRecognition);
+}
+
+function startBrowserFallback(){
+  if(!wantsListening||usingBrowserFallback||!browserSpeechSupported())return false;
+  const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+  browserRecognition=new Recognition();
+  browserRecognition.continuous=true;
+  browserRecognition.interimResults=true;
+  browserRecognition.lang=input.value;
+  usingBrowserFallback=true;
+
+  speechState.textContent='Listening';
+  statusEl.innerHTML='<span class="liveDot"></span>Listening — compatibility mode';
+
+  browserRecognition.onresult=(event)=>{
+    let interim='';
+    let finalChunk='';
+    for(let i=event.resultIndex;i<event.results.length;i++){
+      const text=event.results[i][0]?.transcript||'';
+      if(event.results[i].isFinal)finalChunk+=text+' ';
+      else interim+=text;
+    }
+    if(finalChunk){
+      committedTranscript=normalizeSpaces(committedTranscript+' '+finalChunk);
+      interimTranscript='';
+      const visible=currentTranscript();setTranscript(visible);scheduleTranslation(visible,true);
+    }else{
+      interimTranscript=interim;
+      const visible=currentTranscript();setTranscript(visible);scheduleTranslation(visible);
+    }
+  };
+
+  browserRecognition.onerror=(event)=>{
+    console.warn('Browser speech fallback error:',event.error);
+    if(event.error==='not-allowed'||event.error==='service-not-allowed'){
+      wantsListening=false;
+      usingBrowserFallback=false;
+      speechState.textContent='Microphone blocked';
+      statusEl.textContent='Microphone access is blocked. Allow microphone permission in your browser settings.';
+      mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');
+    }
+  };
+
+  browserRecognition.onend=()=>{
+    if(usingBrowserFallback&&wantsListening){
+      try{browserRecognition.start()}catch{}
+    }
+  };
+
+  try{
+    browserRecognition.start();
+    return true;
+  }catch(error){
+    console.warn('Could not start browser fallback:',error);
+    usingBrowserFallback=false;
+    browserRecognition=null;
+    return false;
+  }
+}
+
+function stopBrowserFallback(){
+  usingBrowserFallback=false;
+  if(browserRecognition){
+    try{browserRecognition.onend=null;browserRecognition.stop()}catch{}
+    browserRecognition=null;
+  }
+}
+
 function scheduleReconnect(){
   if(!wantsListening)return;
   if(!navigator.onLine){
@@ -213,10 +284,11 @@ function scheduleReconnect(){
     return;
   }
   if(reconnectAttempts>=MAX_RECONNECTS){
+    if(startBrowserFallback())return;
     wantsListening=false;
     mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');
     speechState.textContent='Disconnected';
-    statusEl.textContent='Could not reconnect. Tap the microphone to try again.';
+    statusEl.textContent='Speech connection failed. Tap the microphone to try again.';
     return;
   }
   reconnectAttempts+=1;
@@ -330,6 +402,7 @@ async function stopListening(updateUi=true){
   wantsListening=false;
   clearTimeout(reconnectTimer);clearTimeout(sessionLimitTimer);
   ++transcriptionSession;
+  stopBrowserFallback();
   await cleanupAudio();
   mic.classList.remove('listening');mic.setAttribute('aria-label','Start listening');mic.textContent='🎤';
   if(updateUi){
@@ -342,6 +415,7 @@ async function stopListening(updateUi=true){
 mic.onclick=async()=>{
   if(wantsListening){await stopListening(true);return}
   wantsListening=true;
+  usingBrowserFallback=false;
   reconnectAttempts=0;
   await startListening(false);
 };
