@@ -51,6 +51,9 @@
     .smallStatus{text-transform:none;letter-spacing:0;font-size:.72rem}
     .textBox{min-height:104px;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:15px;margin-top:9px;line-height:1.55;color:var(--text);white-space:pre-wrap}
     .placeholder{color:var(--muted)}
+    .liveVoiceRow{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:12px;padding:12px 13px;border:1px solid var(--line);border-radius:16px;background:var(--surface2)}
+    .liveVoiceCopy{display:flex;align-items:center;gap:10px;min-width:0}.liveVoiceCopy strong{display:block;font-size:.9rem}.liveVoiceCopy small{display:block;color:var(--muted);font-size:.72rem;margin-top:2px;line-height:1.3}.liveVoiceState{color:var(--accent);font-weight:900;font-size:.72rem;margin-left:4px}
+    .switch{position:relative;display:inline-flex;flex:0 0 auto;width:52px;height:30px}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;inset:0;cursor:pointer;background:var(--line);border-radius:999px;transition:.2s}.slider:before{content:"";position:absolute;width:24px;height:24px;left:3px;top:3px;background:var(--surface);border-radius:50%;box-shadow:0 2px 8px var(--shadow);transition:.2s}.switch input:checked+.slider{background:var(--accent)}.switch input:checked+.slider:before{transform:translateX(22px)}
     .actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:13px}
     .btn{min-height:52px;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:16px;font-weight:850}
     .btn.primary{background:var(--accent);color:var(--accentText);border-color:transparent}
@@ -93,7 +96,7 @@
       </div>
 
       <div class="panel"><div class="sectionTitle"><span>Live transcription</span><span class="smallStatus" id="speechState"></span></div><div class="textBox placeholder" id="transcript">Your speech will appear here.</div></div>
-      <div class="panel"><div class="sectionTitle"><span>Live translation</span><span class="smallStatus" id="translationState"></span></div><div class="textBox placeholder" id="translation">Your translation will appear here.</div><div class="actions"><button class="btn" id="copy">Copy</button><button class="btn primary" id="speak">🔊 Speak</button><button class="btn" id="clear">Clear</button></div></div>
+      <div class="panel"><div class="sectionTitle"><span>Live translation</span><span class="smallStatus" id="translationState"></span></div><div class="textBox placeholder" id="translation">Your translation will appear here.</div><div class="liveVoiceRow"><div class="liveVoiceCopy"><span style="font-size:22px">🔊</span><div><strong>Live translated voice <span class="liveVoiceState" id="liveVoiceState">Off</span></strong><small>Automatically speak each completed translated phrase</small></div></div><label class="switch" aria-label="Live translated voice"><input type="checkbox" id="liveVoiceToggle"><span class="slider"></span></label></div><div class="actions"><button class="btn" id="copy">Copy</button><button class="btn primary" id="speak">🔊 Speak</button><button class="btn" id="clear">Clear</button></div></div>
     </section>
     <div class="hint">Live speech translation • no sign-in • <a href="/privacy.html" style="color:inherit">Privacy</a></div>
   </main>
