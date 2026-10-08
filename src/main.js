@@ -77,7 +77,8 @@ let pickerTarget='input';
 let wantsListening=false, reconnectAttempts=0, reconnectTimer=null, sessionLimitTimer=null;
 let diagnosticState={network:'idle',token:'idle',microphone:'idle',realtime:'idle',fallback:'idle',error:''};
 let liveVoiceEnabled=false;
-let liveVoiceRequestSequence=0;
+let liveVoiceGeneration=0;
+let liveVoiceQueue=Promise.resolve();
 
 function renderDiagnostics(){
   if(!diagnosticEl||!diagnosticBody)return;
@@ -154,24 +155,29 @@ function renderLiveVoice(){
   liveVoiceState.textContent=!supported?'Unavailable':liveVoiceEnabled?'On':'Off';
 }
 
-async function speakLiveTranslatedPhrase(sourcePhrase){
+function speakLiveTranslatedPhrase(sourcePhrase){
   const clean=normalizeSpaces(sourcePhrase||'');
   if(!liveVoiceEnabled||!clean)return;
-  const seq=++liveVoiceRequestSequence;
-  try{
-    const response=await fetch('/api/translate',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:clean,sourceLanguage:input.value,targetLanguage:output.value})
-    });
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok)throw new Error(data.detail||data.error||'Live voice translation failed');
-    if(seq>liveVoiceRequestSequence||!liveVoiceEnabled)return;
-    const translated=normalizeSpaces(data.translation||'');
-    if(translated)speakText(translated);
-  }catch(error){
-    console.warn('Live translated voice error:',error);
-  }
+  const generation=liveVoiceGeneration;
+  const sourceLanguage=input.value;
+  const targetLanguage=output.value;
+  liveVoiceQueue=liveVoiceQueue.then(async()=>{
+    if(!liveVoiceEnabled||generation!==liveVoiceGeneration)return;
+    try{
+      const response=await fetch('/api/translate',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:clean,sourceLanguage,targetLanguage})
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(data.detail||data.error||'Live voice translation failed');
+      if(!liveVoiceEnabled||generation!==liveVoiceGeneration)return;
+      const translated=normalizeSpaces(data.translation||'');
+      if(translated)speakText(translated);
+    }catch(error){
+      console.warn('Live translated voice error:',error);
+    }
+  });
 }
 
 function updateLanguageButtons(){
