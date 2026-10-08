@@ -38,7 +38,8 @@
     .langBtn{min-height:74px;text-align:left;border:1px solid var(--line);border-radius:18px;background:var(--surface);color:var(--text);padding:11px 13px;display:flex;align-items:center;gap:10px}
     .flag{font-size:25px;line-height:1}.langMeta{min-width:0}.langLabel{font-size:.68rem;color:var(--muted);font-weight:800;letter-spacing:.06em}.langName{margin-top:3px;font-size:1rem;font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .swap{width:58px;height:58px;border:0;border-radius:18px;background:var(--surface2);color:var(--accent);font-size:25px;font-weight:900}
-    .micWrap{text-align:center;padding:34px 0 26px}
+    .sourceMode{display:flex;gap:8px;justify-content:center;margin:20px auto -6px;max-width:420px}.sourceBtn{flex:1;min-height:44px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--muted);font-weight:850}.sourceBtn.active{background:var(--accent);border-color:var(--accent);color:var(--accentText)}.sourceHint{max-width:440px;margin:9px auto 0;color:var(--muted);font-size:.72rem;line-height:1.4;text-align:center}
+    .micWrap{text-align:center;padding:24px 0 26px}
     .mic{width:132px;height:132px;border-radius:50%;border:0;background:var(--accent);color:var(--accentText);font-size:48px;box-shadow:0 18px 42px var(--micShadow);transition:.2s}
     .mic:active{transform:scale(.96)}
     .mic.listening{background:#e53935;animation:pulse 1.65s infinite}
@@ -89,6 +90,8 @@
       <input type="hidden" id="inputLang" value="en-US" />
       <input type="hidden" id="outputLang" value="fr-FR" />
 
+      <div class="sourceMode"><button class="sourceBtn active" id="micSourceBtn" type="button">🎤 Microphone</button><button class="sourceBtn" id="meetingSourceBtn" type="button">🖥️ Meeting audio</button></div>
+      <div class="sourceHint" id="sourceHint">Microphone mode listens to your voice.</div>
       <div class="micWrap">
         <button class="mic" id="mic" aria-label="Start listening">🎤</button>
         <div class="status" id="status">Tap the microphone and start speaking</div>
