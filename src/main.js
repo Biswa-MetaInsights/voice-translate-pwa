@@ -69,6 +69,9 @@ const diagnosticEl=document.getElementById('diagnostic');
 const diagnosticBody=document.getElementById('diagnosticBody');
 const liveVoiceToggle=document.getElementById('liveVoiceToggle');
 const liveVoiceState=document.getElementById('liveVoiceState');
+const micSourceBtn=document.getElementById('micSourceBtn');
+const meetingSourceBtn=document.getElementById('meetingSourceBtn');
+const sourceHint=document.getElementById('sourceHint');
 
 let isListening=false, committedTranscript='', interimTranscript='';
 let audioController=null, mediaStream=null, audioContext=null, sourceNode=null, processorNode=null, muteNode=null;
@@ -79,6 +82,9 @@ let diagnosticState={network:'idle',token:'idle',microphone:'idle',realtime:'idl
 let liveVoiceEnabled=false;
 let liveVoiceGeneration=0;
 let liveVoiceQueue=Promise.resolve();
+let liveVoicePauseTimer=null;
+let lastLiveVoiceSource='';
+let audioSourceMode='mic';
 
 function renderDiagnostics(){
   if(!diagnosticEl||!diagnosticBody)return;
@@ -116,6 +122,7 @@ let favorites=store.get('vt-favorites',['en-US','fr-FR']);
 let recents=store.get('vt-recents',['en-US','fr-FR']);
 let counts=store.get('vt-counts',{});
 liveVoiceEnabled=store.get('vt-live-voice',false);
+audioSourceMode=store.get('vt-audio-source','mic');
 
 function language(code){return LANGUAGES.find(l=>l.code===code)||LANGUAGES[0]}
 function normalizeSpaces(v){return v.replace(/\s+/g,' ').trim()}
@@ -142,9 +149,22 @@ function speakText(text,{replace=false}={}){
   if(voice)utterance.voice=voice;
   utterance.rate=1;
   utterance.pitch=1;
+  utterance.volume=1;
   if(replace)speechSynthesis.cancel();
+  speechSynthesis.resume();
   speechSynthesis.speak(utterance);
   return true;
+}
+
+function primeSpeechSynthesis(){
+  if(!('speechSynthesis' in window)||!('SpeechSynthesisUtterance' in window))return;
+  try{
+    speechSynthesis.resume();
+    const u=new SpeechSynthesisUtterance(' ');
+    u.volume=0;
+    u.lang=output.value;
+    speechSynthesis.speak(u);
+  }catch{}
 }
 
 function renderLiveVoice(){
@@ -178,6 +198,49 @@ function speakLiveTranslatedPhrase(sourcePhrase){
       console.warn('Live translated voice error:',error);
     }
   });
+}
+
+function queueLiveVoiceFromTranscript(text,immediate=false){
+  if(!liveVoiceEnabled)return;
+  const clean=normalizeSpaces(text||'');
+  clearTimeout(liveVoicePauseTimer);
+  if(!clean)return;
+  liveVoicePauseTimer=setTimeout(()=>{
+    if(!liveVoiceEnabled)return;
+    let phrase=clean;
+    if(lastLiveVoiceSource&&clean.startsWith(lastLiveVoiceSource)){
+      phrase=normalizeSpaces(clean.slice(lastLiveVoiceSource.length));
+    }else if(clean===lastLiveVoiceSource){
+      return;
+    }
+    if(!phrase)return;
+    lastLiveVoiceSource=clean;
+    speakLiveTranslatedPhrase(phrase);
+  },immediate?80:1050);
+}
+
+async function setAudioSource(mode){
+  const next=mode==='meeting'?'meeting':'mic';
+  if(next===audioSourceMode)return;
+  const resume=wantsListening;
+  if(resume)await stopListening(false);
+  audioSourceMode=next;
+  store.set('vt-audio-source',audioSourceMode);
+  renderAudioSource();
+  if(resume){
+    wantsListening=true;
+    reconnectAttempts=0;
+    await startListening(false);
+  }
+}
+
+function renderAudioSource(){
+  if(!micSourceBtn||!meetingSourceBtn||!sourceHint)return;
+  micSourceBtn.classList.toggle('active',audioSourceMode==='mic');
+  meetingSourceBtn.classList.toggle('active',audioSourceMode==='meeting');
+  sourceHint.textContent=audioSourceMode==='meeting'
+    ? 'Meeting audio captures sound from a shared tab/screen. When prompted, share the meeting and enable audio.'
+    : 'Microphone mode listens to your voice.';
 }
 
 function updateLanguageButtons(){
@@ -278,7 +341,17 @@ async function translateText(text){
 }
 
 async function createMicrophonePcmStream(){
-  mediaStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+  if(audioSourceMode==='meeting'){
+    if(!navigator.mediaDevices?.getDisplayMedia)throw new Error('Meeting audio capture is not supported in this browser. Use Chrome or Edge on desktop.');
+    mediaStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true,systemAudio:'include',surfaceSwitching:'include'});
+    if(!mediaStream.getAudioTracks().length){
+      mediaStream.getTracks().forEach(t=>t.stop());
+      mediaStream=null;
+      throw new Error('No meeting audio was shared. Choose the meeting tab/screen and enable Share audio.');
+    }
+  }else{
+    mediaStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+  }
   audioContext=new (window.AudioContext||window.webkitAudioContext)({sampleRate:24000,latencyHint:'interactive'});if(audioContext.state==='suspended')await audioContext.resume();
   sourceNode=audioContext.createMediaStreamSource(mediaStream);processorNode=audioContext.createScriptProcessor(4096,1,1);muteNode=audioContext.createGain();muteNode.gain.value=0;
   const pcmStream=new ReadableStream({start(controller){audioController=controller;processorNode.onaudioprocess=e=>{if(!isListening||!audioController)return;const pcm=floatTo16BitPCM(resampleTo24k(e.inputBuffer.getChannelData(0),audioContext.sampleRate));try{controller.enqueue(pcm)}catch{}}},cancel(){audioController=null}});
@@ -301,6 +374,7 @@ function browserSpeechSupported(){
 }
 
 function startBrowserFallback(){
+  if(audioSourceMode==='meeting'){setDiagnostic('fallback','error','Meeting audio requires realtime capture');return false;}
   if(!wantsListening||usingBrowserFallback||!browserSpeechSupported()){setDiagnostic('fallback','error','Browser speech fallback unavailable');return false;}
   const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
   browserRecognition=new Recognition();
@@ -325,8 +399,7 @@ function startBrowserFallback(){
       const finalPhrase=normalizeSpaces(finalChunk);
       committedTranscript=normalizeSpaces(committedTranscript+' '+finalPhrase);
       interimTranscript='';
-      const visible=currentTranscript();setTranscript(visible);scheduleTranslation(visible,true);
-      if(finalPhrase)speakLiveTranslatedPhrase(finalPhrase);
+      const visible=currentTranscript();setTranscript(visible);scheduleTranslation(visible,true);queueLiveVoiceFromTranscript(visible,true);
     }else{
       interimTranscript=interim;
       const visible=currentTranscript();setTranscript(visible);scheduleTranslation(visible);
@@ -448,15 +521,14 @@ async function startListening(isReconnect=false){
       if(part.type==='transcript-delta'){
         interimTranscript+=part.delta||'';
         const visible=currentTranscript();setTranscript(visible);
-        speechState.textContent='Hearing you…';scheduleTranslation(visible);
+        speechState.textContent='Hearing you…';scheduleTranslation(visible);queueLiveVoiceFromTranscript(visible);
       }
       if(part.type==='transcript-final'){
         const finalText=normalizeSpaces(part.text||interimTranscript);
         if(finalText)committedTranscript=normalizeSpaces(committedTranscript+' '+finalText);
         interimTranscript='';
         const visible=currentTranscript();setTranscript(visible);
-        speechState.textContent='Captured';scheduleTranslation(visible,true);
-        if(finalText)speakLiveTranslatedPhrase(finalText);
+        speechState.textContent='Captured';scheduleTranslation(visible,true);queueLiveVoiceFromTranscript(visible,true);
       }
       if(part.type==='error')throw new Error(part.error?.message||part.message||'Speech connection interrupted');
     }
@@ -529,17 +601,20 @@ mic.onclick=async()=>{
   await startListening(false);
 };
 document.getElementById('swap').onclick=async()=>{const resumeListening=wantsListening;if(resumeListening)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);const text=currentTranscript();if(text){lastRequestedText='';scheduleTranslation(text,true)}if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}};
-document.getElementById('clear').onclick=()=>{committedTranscript='';interimTranscript='';lastRequestedText='';++translateSequence;++liveVoiceRequestSequence;clearTimeout(translateTimer);if(translateController)translateController.abort();if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript('');setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
+document.getElementById('clear').onclick=()=>{committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';++translateSequence;++liveVoiceGeneration;clearTimeout(liveVoicePauseTimer);clearTimeout(translateTimer);if(translateController)translateController.abort();if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript('');setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
 copyBtn.onclick=async()=>{if(translationEl.classList.contains('placeholder'))return;try{await navigator.clipboard.writeText(translationEl.textContent);statusEl.textContent='Translation copied'}catch{statusEl.textContent='Copy failed'}};
 speakBtn.onclick=()=>{if(translationEl.classList.contains('placeholder'))return;speakText(translationEl.textContent,{replace:true})};
 if(liveVoiceToggle){
   liveVoiceToggle.onchange=()=>{
     liveVoiceEnabled=Boolean(liveVoiceToggle.checked);
     store.set('vt-live-voice',liveVoiceEnabled);
-    ++liveVoiceRequestSequence;
-    if(!liveVoiceEnabled&&'speechSynthesis' in window)speechSynthesis.cancel();
+    ++liveVoiceGeneration;
+    lastLiveVoiceSource=currentTranscript();
+    clearTimeout(liveVoicePauseTimer);
+    if(liveVoiceEnabled)primeSpeechSynthesis();
+    else if('speechSynthesis' in window)speechSynthesis.cancel();
     renderLiveVoice();
-    statusEl.textContent=liveVoiceEnabled?'Live translated voice is on':'Live translated voice is off';
+    statusEl.textContent=liveVoiceEnabled?'Live translated voice is on — pause briefly after each phrase':'Live translated voice is off';
   };
 }
 window.addEventListener('offline',()=>{
@@ -559,7 +634,10 @@ window.addEventListener('online',()=>{
 window.addEventListener('beforeunload',()=>{if(mediaStream)mediaStream.getTracks().forEach(t=>t.stop())});
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'));
 
+if(micSourceBtn)micSourceBtn.onclick=()=>setAudioSource('mic');
+if(meetingSourceBtn)meetingSourceBtn.onclick=()=>setAudioSource('meeting');
 applyTheme(store.get('vt-theme','calm'));
 updateLanguageButtons();
+renderAudioSource();
 renderLiveVoice();
 if('speechSynthesis' in window)speechSynthesis.onvoiceschanged=renderLiveVoice;
