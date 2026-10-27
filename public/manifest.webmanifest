@@ -1,6 +1,6 @@
 {
-  "name": "Voice Translate",
-  "short_name": "VoiceTranslate",
+  "name": "VoiceTranslator.eu",
+  "short_name": "VoiceTranslator",
   "description": "Live voice transcription and AI translation in a simple installable app.",
   "id": "/",
   "start_url": "/",
