@@ -6,11 +6,11 @@
   <meta name="theme-color" content="#f3fbfa" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="Voice Translate" />
+  <meta name="apple-mobile-web-app-title" content="VoiceTranslator" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/icon.svg" />
-  <title>Voice Translate</title>
+  <title>VoiceTranslator.eu — Live Voice Translation</title>
   <style>
     :root{
       font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
@@ -29,7 +29,7 @@
     .app{max-width:720px;margin:auto;min-height:100vh;padding:max(18px,env(safe-area-inset-top)) 16px max(30px,env(safe-area-inset-bottom))}
     .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
     .brand{display:flex;align-items:center;gap:12px}
-    .logo{width:48px;height:48px;border-radius:16px;background:var(--accent);color:var(--accentText);display:grid;place-items:center;font-size:23px;box-shadow:0 12px 28px var(--shadow)}
+    .logo{width:52px;height:52px;object-fit:contain;flex:none}.brand{min-width:0}.brandcopy{min-width:0}.wordmark{font-size:clamp(.88rem,3.5vw,1.2rem);font-weight:850;letter-spacing:-.04em;white-space:nowrap}.wordmark .voice{color:var(--text)}.wordmark .translator{color:#16b9ba}.wordmark .eu{color:var(--muted)}.powered{margin:18px auto 0;text-align:center;color:var(--muted);font-size:.77rem}.powered a{color:var(--accent);font-weight:800;text-decoration:none}.powered a:hover{text-decoration:underline}
     h1{font-size:1.32rem;margin:0;letter-spacing:-.02em}
     .sub{margin:3px 0 0;color:var(--muted);font-size:.85rem}
     .installLink{min-width:52px;height:52px;border:1px solid var(--line);border-radius:17px;background:var(--surface);color:var(--text);display:grid;place-items:center;text-decoration:none;font-size:20px;box-shadow:0 8px 20px var(--shadow)}.themeBtn{min-width:52px;height:52px;border:1px solid var(--line);border-radius:17px;background:var(--surface);color:var(--text);font-size:22px;box-shadow:0 8px 20px var(--shadow)}
@@ -77,7 +77,7 @@
 <body>
   <main class="app">
     <div class="topbar">
-      <div class="brand"><div class="logo">🎙️</div><div><h1>Voice Translate</h1><p class="sub">Speak naturally. Understand instantly.</p></div></div>
+      <div class="brand"><img class="logo" src="/icon.svg" alt="VoiceTranslator icon"/><div class="brandcopy"><h1 class="wordmark"><span class="voice">Voice</span><span class="translator">Translator</span><span class="eu">.eu</span></h1><p class="sub">Speak naturally. Understand instantly.</p></div></div>
       <div style="display:flex;gap:8px"><a class="installLink" href="/install.html" aria-label="Install app">↓</a><button class="themeBtn" id="themeBtn" aria-label="Choose theme">◐</button></div>
     </div>
 
@@ -101,7 +101,7 @@
       <div class="panel"><div class="sectionTitle"><span>Live transcription</span><span class="smallStatus" id="speechState"></span></div><div class="textBox placeholder" id="transcript">Your speech will appear here.</div></div>
       <div class="panel"><div class="sectionTitle"><span>Live translation</span><span class="smallStatus" id="translationState"></span></div><div class="textBox placeholder" id="translation">Your translation will appear here.</div><div class="liveVoiceRow"><div class="liveVoiceCopy"><span style="font-size:22px">🔊</span><div><strong>Live translated voice <span class="liveVoiceState" id="liveVoiceState">Off</span></strong><small>Automatically speak each completed translated phrase</small></div></div><label class="switch" aria-label="Live translated voice"><input type="checkbox" id="liveVoiceToggle"><span class="slider"></span></label></div><div class="actions"><button class="btn" id="copy">Copy</button><button class="btn primary" id="speak">🔊 Speak</button><button class="btn" id="clear">Clear</button></div></div>
     </section>
-    <div class="hint">Live speech translation • no sign-in • <a href="/privacy.html" style="color:inherit">Privacy</a></div>
+    <div class="hint">Live speech translation • no sign-in • <a href="/privacy.html" style="color:inherit">Privacy</a></div><footer class="powered">Powered by <a href="https://metainsights.eu" target="_blank" rel="noopener noreferrer">Metainsights BV</a></footer>
   </main>
 
   <div class="sheetBackdrop" id="languageSheet" aria-hidden="true"><div class="sheet"><div class="sheetHandle"></div><div class="sheetHead"><h2 id="sheetTitle">Choose language</h2><button class="closeBtn" data-close="languageSheet">×</button></div><input class="search" id="languageSearch" type="search" placeholder="Search languages…" autocomplete="off"/><div id="languageResults"></div></div></div>
