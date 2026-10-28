@@ -1,3 +1,5 @@
+import { getVercelOidcToken } from '@vercel/oidc';
+
 const LANGUAGES = {
   'en-US':'English','fr-FR':'French','nl-NL':'Dutch','de-DE':'German','lb-LU':'Luxembourgish','ga-IE':'Irish',
   'da-DK':'Danish','sv-SE':'Swedish','no-NO':'Norwegian','fi-FI':'Finnish','is-IS':'Icelandic','et-EE':'Estonian',
@@ -88,7 +90,12 @@ export default async function handler(req, res) {
     if (clean.length > 3000) return res.status(413).json({ error: 'Text is too long' });
     if (sourceLanguage === targetLanguage) return res.status(200).json({ translation: clean });
 
-    const token = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
+    const token = process.env.AI_GATEWAY_API_KEY
+      || process.env.VERCEL_OIDC_TOKEN
+      || await getVercelOidcToken({
+        project: 'prj_RCmmAHDK2I3nIzx2ah6QzHpYQkOT',
+        team: 'team_jCrTWcpxHy5Bdmnr30kl9Bp4',
+      });
     if (!token) {
       console.error('No AI Gateway authentication token available');
       return res.status(503).json({ error: 'Translation service is temporarily unavailable' });

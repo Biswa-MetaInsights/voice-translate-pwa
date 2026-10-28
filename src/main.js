@@ -89,7 +89,7 @@ let audioSourceMode='mic';
 function renderDiagnostics(){
   if(!diagnosticEl||!diagnosticBody)return;
   const icon=(v)=>v==='ok'?'✓':v==='pending'?'…':v==='error'?'✕':'–';
-  diagnosticEl.classList.add('show');
+  diagnosticEl.classList.toggle('show',Object.values(diagnosticState).some(value=>value==='error'));
   diagnosticBody.innerHTML=
     'Network '+icon(diagnosticState.network)+' · '+
     'Token '+icon(diagnosticState.token)+' · '+
@@ -111,7 +111,7 @@ function resetDiagnostics(){
 }
 let browserRecognition=null, usingBrowserFallback=false;
 const MAX_SESSION_MS=30*60*1000;
-const MAX_RECONNECTS=2;
+const MAX_RECONNECTS=3;
 
 const store={
   get(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}},
@@ -329,7 +329,15 @@ document.getElementById('themeBtn').onclick=()=>{renderThemes();openSheet('theme
 function floatTo16BitPCM(float32){const buffer=new ArrayBuffer(float32.length*2),view=new DataView(buffer);for(let i=0,o=0;i<float32.length;i++,o+=2){const s=Math.max(-1,Math.min(1,float32[i]));view.setInt16(o,s<0?s*0x8000:s*0x7fff,true)}return new Uint8Array(buffer)}
 function resampleTo24k(samples,inputRate){if(inputRate===24000)return samples;const ratio=inputRate/24000,len=Math.max(1,Math.round(samples.length/ratio)),out=new Float32Array(len);for(let i=0;i<len;i++){const p=i*ratio,l=Math.floor(p),r=Math.min(l+1,samples.length-1),f=p-l;out[i]=samples[l]*(1-f)+samples[r]*f}return out}
 
-function scheduleTranslation(text,immediate=false){const clean=normalizeSpaces(text);clearTimeout(translateTimer);if(!clean){lastRequestedText='';setTranslation('');translationState.textContent='';return}translateTimer=setTimeout(()=>translateText(clean),immediate?0:750)}
+function scheduleTranslation(text,immediate=false){
+  const clean=normalizeSpaces(text);
+  clearTimeout(translateTimer);
+  if(!clean){lastRequestedText='';setTranslation('');translationState.textContent='';return}
+  // The server accepts up to 3,000 characters; keep long sessions usable.
+  const limit=2800;
+  const latest=clean.length>limit?clean.slice(-limit).replace(/^\S+\s*/, '')||clean.slice(-limit):clean;
+  translateTimer=setTimeout(()=>translateText(latest),immediate?0:1400);
+}
 async function translateText(text){
   if(text===lastRequestedText&&!translationEl.classList.contains('placeholder'))return;
   lastRequestedText=text;const seq=++translateSequence;if(translateController)translateController.abort();translateController=new AbortController();translationState.textContent='Translating…';
@@ -340,19 +348,34 @@ async function translateText(text){
   }catch(error){if(error.name==='AbortError')return;console.error(error);translationState.textContent='Translation unavailable';statusEl.textContent='Translation service error. Speech transcription is still active.'}
 }
 
-async function createMicrophonePcmStream(){
+async function createMicrophonePcmStream(sessionId){
+  // Request capture before awaiting the network token: iOS requires a user gesture.
+  let capturedStream;
   if(audioSourceMode==='meeting'){
     if(!navigator.mediaDevices?.getDisplayMedia)throw new Error('Meeting audio capture is not supported in this browser. Use Chrome or Edge on desktop.');
-    mediaStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true,systemAudio:'include',surfaceSwitching:'include'});
-    if(!mediaStream.getAudioTracks().length){
-      mediaStream.getTracks().forEach(t=>t.stop());
-      mediaStream=null;
+    capturedStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true,systemAudio:'include',surfaceSwitching:'include'});
+    if(!capturedStream.getAudioTracks().length){
+      capturedStream.getTracks().forEach(t=>t.stop());
       throw new Error('No meeting audio was shared. Choose the meeting tab/screen and enable Share audio.');
     }
   }else{
-    mediaStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+    capturedStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
   }
+  // A delayed permission prompt must not revive a stopped recording.
+  if(!wantsListening||sessionId!==transcriptionSession){
+    capturedStream.getTracks().forEach(t=>t.stop());
+    const cancelled=new Error('Microphone capture cancelled');
+    cancelled.name='AbortError';
+    throw cancelled;
+  }
+  mediaStream=capturedStream;
   audioContext=new (window.AudioContext||window.webkitAudioContext)({sampleRate:24000,latencyHint:'interactive'});if(audioContext.state==='suspended')await audioContext.resume();
+  if(!wantsListening||sessionId!==transcriptionSession){
+    await cleanupAudio();
+    const cancelled=new Error('Microphone capture cancelled');
+    cancelled.name='AbortError';
+    throw cancelled;
+  }
   sourceNode=audioContext.createMediaStreamSource(mediaStream);processorNode=audioContext.createScriptProcessor(4096,1,1);muteNode=audioContext.createGain();muteNode.gain.value=0;
   const pcmStream=new ReadableStream({start(controller){audioController=controller;processorNode.onaudioprocess=e=>{if(!isListening||!audioController)return;const pcm=floatTo16BitPCM(resampleTo24k(e.inputBuffer.getChannelData(0),audioContext.sampleRate));try{controller.enqueue(pcm)}catch{}}},cancel(){audioController=null}});
   sourceNode.connect(processorNode);processorNode.connect(muteNode);muteNode.connect(audioContext.destination);return pcmStream;
@@ -467,13 +490,14 @@ function scheduleReconnect(){
 
 async function startListening(isReconnect=false){
   if(isListening||!wantsListening)return;
-  if(!navigator.mediaDevices?.getUserMedia){wantsListening=false;statusEl.textContent='Microphone capture is not supported in this browser.';return}
+  if(audioSourceMode==='mic'&&!navigator.mediaDevices?.getUserMedia){wantsListening=false;statusEl.textContent='Microphone capture is not supported in this browser.';return}
+  if(audioSourceMode==='meeting'&&!navigator.mediaDevices?.getDisplayMedia){wantsListening=false;statusEl.textContent='Meeting audio works in supported desktop browsers such as Chrome and Edge.';return}
   if(!navigator.onLine){setDiagnostic('network','error','Device is offline');scheduleReconnect();return}
   setDiagnostic('network','ok');
 
   const sessionId=++transcriptionSession;
   isListening=true;
-  mic.classList.add('listening');mic.setAttribute('aria-label','Stop listening');mic.textContent='■';
+  mic.classList.add('listening');mic.setAttribute('aria-label','Stop listening');mic.setAttribute('aria-pressed','true');mic.textContent='■';
   statusEl.innerHTML='<span class="liveDot"></span>'+(isReconnect?'Reconnecting…':'Starting microphone…');
   speechState.textContent=isReconnect?'Reconnecting…':'Connecting';
 
@@ -487,19 +511,20 @@ async function startListening(isReconnect=false){
     },MAX_SESSION_MS);
   }
 
-  let failureStage='token';
+  let failureStage='microphone';
   try{
+    setDiagnostic('microphone','pending');
+    const microphoneStream=await createMicrophonePcmStream(sessionId);
+    if(!wantsListening||sessionId!==transcriptionSession)return;
+    setDiagnostic('microphone','ok');
+
+    failureStage='token';
     setDiagnostic('token','pending');
     const tokenResponse=await fetch('/api/transcription-token',{method:'POST'});
     const tokenData=await tokenResponse.json().catch(()=>({}));
+    if(!wantsListening||sessionId!==transcriptionSession)return;
     if(!tokenResponse.ok||!tokenData.token){const detail=tokenData.detail?': '+tokenData.detail:'';throw new Error((tokenData.error||'Speech service unavailable')+detail+' (HTTP '+tokenResponse.status+')');}
     setDiagnostic('token','ok');
-    if(!wantsListening||sessionId!==transcriptionSession)return;
-
-    failureStage='microphone';
-    setDiagnostic('microphone','pending');
-    const microphoneStream=await createMicrophonePcmStream();
-    setDiagnostic('microphone','ok');
     const gateway=createGateway({apiKey:tokenData.token});
     failureStage='realtime';
     setDiagnostic('realtime','pending');
@@ -509,19 +534,22 @@ async function startListening(isReconnect=false){
       inputAudioFormat:{type:'audio/pcm',rate:24000}
     });
 
-    reconnectAttempts=0;
     let receivedRealtimeEvent=false;
     statusEl.innerHTML='<span class="liveDot"></span>Listening — tap again to stop';
     speechState.textContent='Listening';
     noteUse(input.value);
 
     for await(const part of result.fullStream){
-      if(!receivedRealtimeEvent){receivedRealtimeEvent=true;setDiagnostic('realtime','ok')}
+      if(!receivedRealtimeEvent&&(part.type==='transcript-delta'||part.type==='transcript-final')){
+        receivedRealtimeEvent=true;
+        reconnectAttempts=0;
+        setDiagnostic('realtime','ok');
+      }
       if(!wantsListening||sessionId!==transcriptionSession)break;
       if(part.type==='transcript-delta'){
         interimTranscript+=part.delta||'';
         const visible=currentTranscript();setTranscript(visible);
-        speechState.textContent='Hearing you…';scheduleTranslation(visible);queueLiveVoiceFromTranscript(visible);
+        speechState.textContent='Hearing you…';scheduleTranslation(visible);
       }
       if(part.type==='transcript-final'){
         const finalText=normalizeSpaces(part.text||interimTranscript);
@@ -584,7 +612,7 @@ async function stopListening(updateUi=true){
   ++transcriptionSession;
   stopBrowserFallback();
   await cleanupAudio();
-  mic.classList.remove('listening');mic.setAttribute('aria-label','Start listening');mic.textContent='🎤';
+  mic.classList.remove('listening');mic.setAttribute('aria-label','Start listening');mic.setAttribute('aria-pressed','false');mic.textContent='🎤';
   if(updateUi){
     speechState.textContent=committedTranscript?'Stopped':'';
     statusEl.textContent='Stopped — tap the microphone to continue';
@@ -641,3 +669,8 @@ updateLanguageButtons();
 renderAudioSource();
 renderLiveVoice();
 if('speechSynthesis' in window)speechSynthesis.onvoiceschanged=renderLiveVoice;
+if(!navigator.mediaDevices?.getDisplayMedia&&meetingSourceBtn){
+  meetingSourceBtn.disabled=true;
+  meetingSourceBtn.title='Meeting audio capture is available on supported desktop browsers';
+  if(audioSourceMode==='meeting'){audioSourceMode='mic';renderAudioSource();}
+}
