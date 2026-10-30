@@ -7,8 +7,13 @@ const LANGUAGES = {
   'ro-RO':'Romanian','rm-CH':'Romansh','it-IT':'Italian','es-ES':'Spanish','pt-PT':'Portuguese','el-GR':'Greek',
   'mt-MT':'Maltese','ca-ES':'Catalan','bg-BG':'Bulgarian','hr-HR':'Croatian','sl-SI':'Slovenian','sr-RS':'Serbian',
   'bs-BA':'Bosnian','sq-AL':'Albanian','mk-MK':'Macedonian','uk-UA':'Ukrainian','ru-RU':'Russian','tr-TR':'Turkish',
-  'ar-SA':'Arabic','zh-CN':'Chinese (Mandarin)','hi-IN':'Hindi','ml-IN':'Malayalam','ta-IN':'Tamil','te-IN':'Telugu',
-  'kn-IN':'Kannada'
+  'ar-SA':'Arabic (Standard)','zh-CN':'Chinese (Mandarin, Simplified)','hi-IN':'Hindi','ml-IN':'Malayalam','ta-IN':'Tamil','te-IN':'Telugu',
+  'kn-IN':'Kannada',
+  'eu-ES':'Basque','gl-ES':'Galician','cy-GB':'Welsh','gd-GB':'Scottish Gaelic','br-FR':'Breton',
+  'oc-FR':'Occitan','co-FR':'Corsican','fy-NL':'Western Frisian','fo-FO':'Faroese','se-NO':'Northern Sami',
+  'be-BY':'Belarusian','hy-AM':'Armenian','ka-GE':'Georgian','he-IL':'Hebrew','fa-IR':'Persian (Farsi)',
+  'ar-EG':'Arabic (Egyptian)','ar-MA':'Arabic (Moroccan)','ar-AE':'Arabic (Gulf)',
+  'zh-TW':'Chinese (Traditional)','yue-HK':'Cantonese','ja-JP':'Japanese','ko-KR':'Korean',
 };
 
 const LIMIT_WINDOW_MS = 60_000;
