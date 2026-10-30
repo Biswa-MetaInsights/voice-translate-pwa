@@ -38,8 +38,30 @@ const LANGUAGES = [
   {code:'uk-UA',name:'Ukrainian',flag:'🇺🇦',region:'Eastern Europe & Balkans'},
   {code:'ru-RU',name:'Russian',flag:'🇷🇺',region:'Eastern Europe & Balkans'},
   {code:'tr-TR',name:'Turkish',flag:'🇹🇷',region:'Middle East & Asia'},
-  {code:'ar-SA',name:'Arabic',flag:'🇸🇦',region:'Middle East & Asia'},
-  {code:'zh-CN',name:'Chinese (Mandarin)',flag:'🇨🇳',region:'Middle East & Asia'},
+  {code:'eu-ES',name:'Basque',flag:'🇪🇸',region:'Regional European Languages'},
+  {code:'gl-ES',name:'Galician',flag:'🇪🇸',region:'Regional European Languages'},
+  {code:'cy-GB',name:'Welsh',flag:'🏴',region:'Regional European Languages'},
+  {code:'gd-GB',name:'Scottish Gaelic',flag:'🏴',region:'Regional European Languages'},
+  {code:'br-FR',name:'Breton',flag:'🇫🇷',region:'Regional European Languages'},
+  {code:'oc-FR',name:'Occitan',flag:'🇫🇷',region:'Regional European Languages'},
+  {code:'co-FR',name:'Corsican',flag:'🇫🇷',region:'Regional European Languages'},
+  {code:'fy-NL',name:'Western Frisian',flag:'🇳🇱',region:'Regional European Languages'},
+  {code:'fo-FO',name:'Faroese',flag:'🇫🇴',region:'Regional European Languages'},
+  {code:'se-NO',name:'Northern Sami',flag:'🇳🇴',region:'Regional European Languages'},
+  {code:'be-BY',name:'Belarusian',flag:'🇧🇾',region:'Eastern Europe & Balkans'},
+  {code:'hy-AM',name:'Armenian',flag:'🇦🇲',region:'Eastern Europe & Balkans'},
+  {code:'ka-GE',name:'Georgian',flag:'🇬🇪',region:'Eastern Europe & Balkans'},
+  {code:'he-IL',name:'Hebrew',flag:'🇮🇱',region:'Middle East & Asia'},
+  {code:'fa-IR',name:'Persian (Farsi)',flag:'🇮🇷',region:'Middle East & Asia'},
+  {code:'ar-SA',name:'Arabic (Standard)',flag:'🇸🇦',region:'Middle East & Asia'},
+  {code:'ar-EG',name:'Arabic (Egyptian)',flag:'🇪🇬',region:'Middle East & Asia'},
+  {code:'ar-MA',name:'Arabic (Moroccan)',flag:'🇲🇦',region:'Middle East & Asia'},
+  {code:'ar-AE',name:'Arabic (Gulf)',flag:'🇦🇪',region:'Middle East & Asia'},
+  {code:'zh-CN',name:'Chinese (Mandarin, Simplified)',flag:'🇨🇳',region:'East Asia'},
+  {code:'zh-TW',name:'Chinese (Traditional)',flag:'🇹🇼',region:'East Asia'},
+  {code:'yue-HK',name:'Cantonese',flag:'🇭🇰',region:'East Asia'},
+  {code:'ja-JP',name:'Japanese',flag:'🇯🇵',region:'East Asia'},
+  {code:'ko-KR',name:'Korean',flag:'🇰🇷',region:'East Asia'},
   {code:'hi-IN',name:'Hindi',flag:'🇮🇳',region:'South Asia'},
   {code:'ml-IN',name:'Malayalam',flag:'🇮🇳',region:'South Asia'},
   {code:'ta-IN',name:'Tamil',flag:'🇮🇳',region:'South Asia'},
@@ -82,6 +104,7 @@ let diagnosticState={network:'idle',token:'idle',microphone:'idle',realtime:'idl
 let liveVoiceEnabled=false;
 let liveVoiceGeneration=0;
 let liveVoiceQueue=Promise.resolve();
+let translatedCommitted='',translatedInterim='',lastInterimText='',finalPhraseQueue=Promise.resolve(),translationEpoch=0,lastPreviewAt=0;
 let liveVoicePauseTimer=null;
 let lastLiveVoiceSource='';
 let audioSourceMode='mic';
@@ -126,8 +149,8 @@ audioSourceMode=store.get('vt-audio-source','mic');
 
 function language(code){return LANGUAGES.find(l=>l.code===code)||LANGUAGES[0]}
 function normalizeSpaces(v){return v.replace(/\s+/g,' ').trim()}
-function setTranscript(text){transcriptEl.textContent=text||'Your speech will appear here.';transcriptEl.className=text?'textBox':'textBox placeholder'}
-function setTranslation(text){translationEl.textContent=text||'Your translation will appear here.';translationEl.className=text?'textBox':'textBox placeholder'}
+function setTranscript(text){transcriptEl.textContent=text||'Your speech will appear here.';transcriptEl.className=text?'textBox':'textBox placeholder';transcriptEl.dir=/^(ar|he|fa|ur)(-|$)/.test(input.value)?'rtl':'auto'}
+function setTranslation(text){translationEl.textContent=text||'Your translation will appear here.';translationEl.className=text?'textBox':'textBox placeholder';translationEl.dir=/^(ar|he|fa|ur)(-|$)/.test(output.value)?'rtl':'auto'}
 function currentTranscript(){return normalizeSpaces(committedTranscript+' '+interimTranscript)}
 
 function chooseSpeechVoice(lang){
@@ -175,49 +198,8 @@ function renderLiveVoice(){
   liveVoiceState.textContent=!supported?'Unavailable':liveVoiceEnabled?'On':'Off';
 }
 
-function speakLiveTranslatedPhrase(sourcePhrase){
-  const clean=normalizeSpaces(sourcePhrase||'');
-  if(!liveVoiceEnabled||!clean)return;
-  const generation=liveVoiceGeneration;
-  const sourceLanguage=input.value;
-  const targetLanguage=output.value;
-  liveVoiceQueue=liveVoiceQueue.then(async()=>{
-    if(!liveVoiceEnabled||generation!==liveVoiceGeneration)return;
-    try{
-      const response=await fetch('/api/translate',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({text:clean,sourceLanguage,targetLanguage})
-      });
-      const data=await response.json().catch(()=>({}));
-      if(!response.ok)throw new Error(data.detail||data.error||'Live voice translation failed');
-      if(!liveVoiceEnabled||generation!==liveVoiceGeneration)return;
-      const translated=normalizeSpaces(data.translation||'');
-      if(translated)speakText(translated);
-    }catch(error){
-      console.warn('Live translated voice error:',error);
-    }
-  });
-}
-
-function queueLiveVoiceFromTranscript(text,immediate=false){
-  if(!liveVoiceEnabled)return;
-  const clean=normalizeSpaces(text||'');
-  clearTimeout(liveVoicePauseTimer);
-  if(!clean)return;
-  liveVoicePauseTimer=setTimeout(()=>{
-    if(!liveVoiceEnabled)return;
-    let phrase=clean;
-    if(lastLiveVoiceSource&&clean.startsWith(lastLiveVoiceSource)){
-      phrase=normalizeSpaces(clean.slice(lastLiveVoiceSource.length));
-    }else if(clean===lastLiveVoiceSource){
-      return;
-    }
-    if(!phrase)return;
-    lastLiveVoiceSource=clean;
-    speakLiveTranslatedPhrase(phrase);
-  },immediate?80:1050);
-}
+// Translated voice now reuses finalized phrase translations from the main pipeline.
+// No secondary translation call or one-second speech delay is necessary.
 
 async function setAudioSource(mode){
   const next=mode==='meeting'?'meeting':'mic';
@@ -301,7 +283,7 @@ async function selectLanguage(code){
   if(resumeListening)await stopListening(false);
   if(pickerTarget==='input')input.value=code;else output.value=code;
   noteUse(code);updateLanguageButtons();closeSheet('languageSheet');
-  const text=currentTranscript();if(text){lastRequestedText='';scheduleTranslation(text,true)}
+  resetTranslationPipeline(true)
   if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}
 }
 
@@ -329,23 +311,111 @@ document.getElementById('themeBtn').onclick=()=>{renderThemes();openSheet('theme
 function floatTo16BitPCM(float32){const buffer=new ArrayBuffer(float32.length*2),view=new DataView(buffer);for(let i=0,o=0;i<float32.length;i++,o+=2){const s=Math.max(-1,Math.min(1,float32[i]));view.setInt16(o,s<0?s*0x8000:s*0x7fff,true)}return new Uint8Array(buffer)}
 function resampleTo24k(samples,inputRate){if(inputRate===24000)return samples;const ratio=inputRate/24000,len=Math.max(1,Math.round(samples.length/ratio)),out=new Float32Array(len);for(let i=0;i<len;i++){const p=i*ratio,l=Math.floor(p),r=Math.min(l+1,samples.length-1),f=p-l;out[i]=samples[l]*(1-f)+samples[r]*f}return out}
 
-function scheduleTranslation(text,immediate=false){
-  const clean=normalizeSpaces(text);
+
+// Translate finalized phrases once, in order. Long conversations never resend the full transcript.
+// Interim previews are optional, throttled and cancellable, leaving room for final phrases.
+function showTranslatedText(){
+  setTranslation(normalizeSpaces(translatedCommitted+' '+translatedInterim));
+}
+function resetTranslationPipeline(retranslateHistory=false){
+  ++translationEpoch;
+  ++translateSequence;
   clearTimeout(translateTimer);
-  if(!clean){lastRequestedText='';setTranslation('');translationState.textContent='';return}
-  // The server accepts up to 3,000 characters; keep long sessions usable.
-  const limit=2800;
-  const latest=clean.length>limit?clean.slice(-limit).replace(/^\S+\s*/, '')||clean.slice(-limit):clean;
-  translateTimer=setTimeout(()=>translateText(latest),immediate?0:1400);
+  if(translateController)translateController.abort();
+  translateController=null;
+  finalPhraseQueue=Promise.resolve();
+  translatedCommitted='';
+  translatedInterim='';
+  lastInterimText='';
+  lastRequestedText='';
+  lastPreviewAt=0;
+  showTranslatedText();
+  translationState.textContent='';
+  if(retranslateHistory&&committedTranscript)queueFinalTranslation(committedTranscript);
+  if(retranslateHistory&&interimTranscript)scheduleTranslation(interimTranscript);
+}
+function scheduleTranslation(text,immediate=false){
+  const clean=normalizeSpaces(text||'');
+  clearTimeout(translateTimer);
+  if(!clean){
+    ++translateSequence;
+    if(translateController)translateController.abort();
+    translateController=null;
+    translatedInterim='';
+    lastInterimText='';
+    showTranslatedText();
+    return;
+  }
+  if(clean===lastInterimText)return;
+  const untilReady=Math.max(0,2000-(Date.now()-lastPreviewAt));
+  translateTimer=setTimeout(()=>translateText(clean),Math.max(immediate?0:350,untilReady));
 }
 async function translateText(text){
-  if(text===lastRequestedText&&!translationEl.classList.contains('placeholder'))return;
-  lastRequestedText=text;const seq=++translateSequence;if(translateController)translateController.abort();translateController=new AbortController();translationState.textContent='Translating…';
+  if(!text||text===lastInterimText)return;
+  const epoch=translationEpoch;
+  const seq=++translateSequence;
+  if(translateController)translateController.abort();
+  const controller=new AbortController();
+  translateController=controller;
+  lastInterimText=text;
+  lastPreviewAt=Date.now();
+  translationState.textContent='Translating…';
+  const started=performance.now();
   try{
-    const response=await fetch('/api/translate',{method:'POST',headers:{'Content-Type':'application/json'},signal:translateController.signal,body:JSON.stringify({text,sourceLanguage:input.value,targetLanguage:output.value})});
-    const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.detail||data.error||'Translation request failed');if(seq!==translateSequence)return;
-    setTranslation(data.translation||'');translationState.textContent=isListening?'Live':'Ready';
-  }catch(error){if(error.name==='AbortError')return;console.error(error);translationState.textContent='Translation unavailable';statusEl.textContent='Translation service error. Speech transcription is still active.'}
+    const response=await fetch('/api/translate',{
+      method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
+      body:JSON.stringify({text:text.slice(-2800),sourceLanguage:input.value,targetLanguage:output.value})
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(data.error||'Translation failed');
+    if(epoch!==translationEpoch||seq!==translateSequence)return;
+    translatedInterim=normalizeSpaces(data.translation||'');
+    showTranslatedText();
+    translationState.textContent='Preview · '+Math.round(performance.now()-started)+'ms';
+  }catch(error){
+    if(error.name==='AbortError'||epoch!==translationEpoch||seq!==translateSequence)return;
+    lastInterimText='';
+    console.warn('Interim translation unavailable:',error);
+    translationState.textContent='Listening';
+  }
+}
+function queueFinalTranslation(phrase){
+  const text=normalizeSpaces(phrase||'');
+  if(!text)return;
+  const epoch=translationEpoch;
+  const voiceGeneration=liveVoiceGeneration;
+  const sourceLanguage=input.value,targetLanguage=output.value;
+  ++translateSequence;
+  clearTimeout(translateTimer);
+  if(translateController)translateController.abort();
+  translateController=null;
+  lastInterimText='';
+  translatedInterim='';
+  showTranslatedText();
+  translationState.textContent='Translating…';
+  finalPhraseQueue=finalPhraseQueue.catch(()=>{}).then(async()=>{
+    if(epoch!==translationEpoch)return;
+    const started=performance.now();
+    try{
+      const response=await fetch('/api/translate',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:text.slice(-2800),sourceLanguage,targetLanguage})
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(data.error||'Translation failed');
+      if(epoch!==translationEpoch)return;
+      const translated=normalizeSpaces(data.translation||'');
+      if(!translated)return;
+      translatedCommitted=normalizeSpaces(translatedCommitted+' '+translated);
+      showTranslatedText();
+      translationState.textContent=(isListening?'Live':'Ready')+' · '+Math.round(performance.now()-started)+'ms';
+      if(liveVoiceEnabled&&voiceGeneration===liveVoiceGeneration)speakText(translated);
+    }catch(error){
+      if(epoch!==translationEpoch)return;
+      console.warn('Final translation failed:',error);
+      translationState.textContent='Translation unavailable — listening continues';
+    }
+  });
 }
 
 async function createMicrophonePcmStream(sessionId){
@@ -422,10 +492,10 @@ function startBrowserFallback(){
       const finalPhrase=normalizeSpaces(finalChunk);
       committedTranscript=normalizeSpaces(committedTranscript+' '+finalPhrase);
       interimTranscript='';
-      const visible=currentTranscript();setTranscript(visible);scheduleTranslation(visible,true);queueLiveVoiceFromTranscript(visible,true);
+      const visible=currentTranscript();setTranscript(visible);queueFinalTranslation(finalPhrase);
     }else{
       interimTranscript=interim;
-      const visible=currentTranscript();setTranscript(visible);scheduleTranslation(visible);
+      const visible=currentTranscript();setTranscript(visible);scheduleTranslation(interimTranscript);
     }
   };
 
@@ -549,14 +619,14 @@ async function startListening(isReconnect=false){
       if(part.type==='transcript-delta'){
         interimTranscript+=part.delta||'';
         const visible=currentTranscript();setTranscript(visible);
-        speechState.textContent='Hearing you…';scheduleTranslation(visible);
+        speechState.textContent='Hearing you…';scheduleTranslation(interimTranscript);
       }
       if(part.type==='transcript-final'){
         const finalText=normalizeSpaces(part.text||interimTranscript);
         if(finalText)committedTranscript=normalizeSpaces(committedTranscript+' '+finalText);
         interimTranscript='';
         const visible=currentTranscript();setTranscript(visible);
-        speechState.textContent='Captured';scheduleTranslation(visible,true);queueLiveVoiceFromTranscript(visible,true);
+        speechState.textContent='Captured';queueFinalTranslation(finalText);
       }
       if(part.type==='error')throw new Error(part.error?.message||part.message||'Speech connection interrupted');
     }
@@ -616,7 +686,7 @@ async function stopListening(updateUi=true){
   if(updateUi){
     speechState.textContent=committedTranscript?'Stopped':'';
     statusEl.textContent='Stopped — tap the microphone to continue';
-    const text=currentTranscript();if(text)scheduleTranslation(text,true);
+    if(interimTranscript){const tail=normalizeSpaces(interimTranscript);committedTranscript=normalizeSpaces(committedTranscript+' '+tail);interimTranscript='';setTranscript(currentTranscript());queueFinalTranslation(tail)}
   }
 }
 
@@ -628,8 +698,8 @@ mic.onclick=async()=>{
   resetDiagnostics();
   await startListening(false);
 };
-document.getElementById('swap').onclick=async()=>{const resumeListening=wantsListening;if(resumeListening)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);const text=currentTranscript();if(text){lastRequestedText='';scheduleTranslation(text,true)}if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}};
-document.getElementById('clear').onclick=()=>{committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';++translateSequence;++liveVoiceGeneration;clearTimeout(liveVoicePauseTimer);clearTimeout(translateTimer);if(translateController)translateController.abort();if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript('');setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
+document.getElementById('swap').onclick=async()=>{const resumeListening=wantsListening;if(resumeListening)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);resetTranslationPipeline(true)if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}};
+document.getElementById('clear').onclick=()=>{committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';++liveVoiceGeneration;resetTranslationPipeline();clearTimeout(liveVoicePauseTimer);if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript('');setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
 copyBtn.onclick=async()=>{if(translationEl.classList.contains('placeholder'))return;try{await navigator.clipboard.writeText(translationEl.textContent);statusEl.textContent='Translation copied'}catch{statusEl.textContent='Copy failed'}};
 speakBtn.onclick=()=>{if(translationEl.classList.contains('placeholder'))return;speakText(translationEl.textContent,{replace:true})};
 if(liveVoiceToggle){
