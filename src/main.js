@@ -66,7 +66,8 @@ const LANGUAGES = [
   {code:'ml-IN',name:'Malayalam',flag:'🇮🇳',region:'South Asia'},
   {code:'ta-IN',name:'Tamil',flag:'🇮🇳',region:'South Asia'},
   {code:'te-IN',name:'Telugu',flag:'🇮🇳',region:'South Asia'},
-  {code:'kn-IN',name:'Kannada',flag:'🇮🇳',region:'South Asia'}
+  {code:'kn-IN',name:'Kannada',flag:'🇮🇳',region:'South Asia'},
+  {code:'fil-PH',name:'Filipino (Tagalog)',flag:'🇵🇭',region:'Southeast Asia'}
 ];
 
 const THEMES = [
