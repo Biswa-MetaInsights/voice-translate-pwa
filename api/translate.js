@@ -9,6 +9,7 @@ const LANGUAGES = {
   'bs-BA':'Bosnian','sq-AL':'Albanian','mk-MK':'Macedonian','uk-UA':'Ukrainian','ru-RU':'Russian','tr-TR':'Turkish',
   'ar-SA':'Arabic (Standard)','zh-CN':'Chinese (Mandarin, Simplified)','hi-IN':'Hindi','ml-IN':'Malayalam','ta-IN':'Tamil','te-IN':'Telugu',
   'kn-IN':'Kannada',
+  'fil-PH':'Filipino (Tagalog)',
   'eu-ES':'Basque','gl-ES':'Galician','cy-GB':'Welsh','gd-GB':'Scottish Gaelic','br-FR':'Breton',
   'oc-FR':'Occitan','co-FR':'Corsican','fy-NL':'Western Frisian','fo-FO':'Faroese','se-NO':'Northern Sami',
   'be-BY':'Belarusian','hy-AM':'Armenian','ka-GE':'Georgian','he-IL':'Hebrew','fa-IR':'Persian (Farsi)',
