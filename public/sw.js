@@ -1,4 +1,4 @@
-const CACHE = "voice-translate-v15";
+const CACHE = "voice-translate-v16";
 const ASSETS = ["/", "/index.html", "/install.html", "/privacy.html", "/manifest.webmanifest", "/icon.svg", "/icon-maskable.svg"];
 
 self.addEventListener("install", (event) => {
@@ -33,3 +33,4 @@ self.addEventListener("fetch", (event) => {
       .catch(() => caches.match(event.request).then((cached) => cached || (event.request.mode === "navigate" ? caches.match("/") : Response.error())))
   );
 });
+

@@ -69,6 +69,8 @@ const LANGUAGES = [
   {code:'kn-IN',name:'Kannada',flag:'🇮🇳',region:'South Asia'},
   {code:'fil-PH',name:'Filipino (Tagalog)',flag:'🇵🇭',region:'Southeast Asia'}
 ];
+const AUTO_LANGUAGE={code:'auto',name:'Auto-detect',flag:'🌐',region:'Automatic'};
+let detectedInputLanguage=null;
 
 const THEMES = [
   {id:'calm',name:'Calm',desc:'Light, soft and focused',icon:'◌'},
@@ -148,7 +150,12 @@ let counts=store.get('vt-counts',{});
 liveVoiceEnabled=store.get('vt-live-voice',false);
 audioSourceMode=store.get('vt-audio-source','mic');
 
-function language(code){return LANGUAGES.find(l=>l.code===code)||LANGUAGES[0]}
+function language(code){return code==='auto'?AUTO_LANGUAGE:LANGUAGES.find(l=>l.code===code)||LANGUAGES[0]}
+function showDetectedLanguage(code){
+  detectedInputLanguage=code==='mixed'||LANGUAGES.some(l=>l.code===code)?code:null;
+  const label=document.getElementById('detectedLanguage');
+  if(label)label.textContent=input.value!=='auto'?'':detectedInputLanguage==='mixed'?'Detected: mixed languages':detectedInputLanguage?'Detected: '+language(detectedInputLanguage).name:'Language will be detected as you speak';
+}
 function normalizeSpaces(v){return v.replace(/\s+/g,' ').trim()}
 function setTranscript(text){transcriptEl.textContent=text||'Your speech will appear here.';transcriptEl.className=text?'textBox':'textBox placeholder';transcriptEl.dir=/^(ar|he|fa|ur)(-|$)/.test(input.value)?'rtl':'auto'}
 function setTranslation(text){translationEl.textContent=text||'Your translation will appear here.';translationEl.className=text?'textBox':'textBox placeholder';translationEl.dir=/^(ar|he|fa|ur)(-|$)/.test(output.value)?'rtl':'auto'}
@@ -230,9 +237,14 @@ function updateLanguageButtons(){
   const a=language(input.value),b=language(output.value);
   document.getElementById('inputFlag').textContent=a.flag;document.getElementById('inputName').textContent=a.name;
   document.getElementById('outputFlag').textContent=b.flag;document.getElementById('outputName').textContent=b.name;
+  const swap=document.getElementById('swap');
+  swap.disabled=input.value==='auto';
+  swap.title=input.value==='auto'?'Choose an input language to swap':'Swap languages';
+  showDetectedLanguage(detectedInputLanguage);
 }
 
 function noteUse(code){
+  if(code==='auto')return;
   counts[code]=(counts[code]||0)+1;store.set('vt-counts',counts);
   recents=[code,...recents.filter(x=>x!==code)].slice(0,6);store.set('vt-recents',recents);
 }
@@ -246,17 +258,20 @@ function renderLanguagePicker(query=''){
   const host=document.getElementById('languageResults');
   const q=query.trim().toLowerCase();
   host.innerHTML='';
-  const filtered=LANGUAGES.filter(l=>!q||l.name.toLowerCase().includes(q)||l.region.toLowerCase().includes(q));
+  const available=pickerTarget==='input'?[AUTO_LANGUAGE,...LANGUAGES]:LANGUAGES;
+  const filtered=available.filter(l=>!q||l.name.toLowerCase().includes(q)||l.region.toLowerCase().includes(q));
   const sections=[];
+  const automatic=filtered.filter(l=>l.code==='auto');
+  if(automatic.length)sections.push(['Automatic',automatic]);
   if(!q){
     const fav=filtered.filter(l=>favorites.includes(l.code));
-    const recent=recents.map(language).filter((l,i,a)=>a.findIndex(x=>x.code===l.code)===i && !favorites.includes(l.code));
+    const recent=recents.filter(code=>available.some(l=>l.code===code)).map(language).filter((l,i,a)=>a.findIndex(x=>x.code===l.code)===i && !favorites.includes(l.code));
     const frequent=[...filtered].filter(l=>(counts[l.code]||0)>0&&!favorites.includes(l.code)&&!recents.includes(l.code)).sort((a,b)=>(counts[b.code]||0)-(counts[a.code]||0)).slice(0,5);
     if(fav.length)sections.push(['Favorites',fav]);
     if(recent.length)sections.push(['Recent',recent]);
     if(frequent.length)sections.push(['Frequently used',frequent]);
   }
-  const regions=[...new Set(filtered.map(l=>l.region))];
+  const regions=[...new Set(filtered.filter(l=>l.code!=='auto').map(l=>l.region))];
   regions.forEach(r=>sections.push([r,filtered.filter(l=>l.region===r)]));
   const seen=new Set();
   for(const [title,items] of sections){
@@ -272,6 +287,7 @@ function renderLanguagePicker(query=''){
       choose.onclick=()=>selectLanguage(l.code);
       const star=document.createElement('button');star.className='starBtn'+(favorites.includes(l.code)?' active':'');star.textContent=favorites.includes(l.code)?'★':'☆';star.setAttribute('aria-label','Favorite '+l.name);
       star.onclick=()=>{favorites=favorites.includes(l.code)?favorites.filter(x=>x!==l.code):[...favorites,l.code];store.set('vt-favorites',favorites);renderLanguagePicker(document.getElementById('languageSearch').value)};
+      if(l.code==='auto'){star.disabled=true;star.textContent='';star.removeAttribute('aria-label')}
       row.append(flag,choose,star);list.appendChild(row);
     });
     host.appendChild(list);
@@ -280,6 +296,8 @@ function renderLanguagePicker(query=''){
 }
 
 async function selectLanguage(code){
+  if(code==='auto'&&pickerTarget!=='input')return;
+  showDetectedLanguage(null);
   const resumeListening=wantsListening&&pickerTarget==='input';
   if(resumeListening)await stopListening(false);
   if(pickerTarget==='input')input.value=code;else output.value=code;
@@ -330,6 +348,7 @@ function resetTranslationPipeline(retranslateHistory=false){
   lastInterimText='';
   lastRequestedText='';
   lastPreviewAt=0;
+  showDetectedLanguage(null);
   showTranslatedText();
   translationState.textContent='';
   if(retranslateHistory&&committedTranscript)queueFinalTranslation(committedTranscript);
@@ -406,6 +425,7 @@ function queueFinalTranslation(phrase){
       if(!response.ok)throw new Error(data.error||'Translation failed');
       if(epoch!==translationEpoch)return;
       const translated=normalizeSpaces(data.translation||'');
+      if(sourceLanguage==='auto')showDetectedLanguage(data.detectedLanguage);
       if(!translated)return;
       translatedCommitted=normalizeSpaces(translatedCommitted+' '+translated);
       showTranslatedText();
@@ -468,6 +488,10 @@ function browserSpeechSupported(){
 }
 
 function startBrowserFallback(){
+  if(input.value==='auto'){
+    setDiagnostic('fallback','error','Automatic detection needs the realtime speech service');
+    return false;
+  }
   if(audioSourceMode==='meeting'){setDiagnostic('fallback','error','Meeting audio requires realtime capture');return false;}
   if(!wantsListening||usingBrowserFallback||!browserSpeechSupported()){setDiagnostic('fallback','error','Browser speech fallback unavailable');return false;}
   const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -549,7 +573,9 @@ function scheduleReconnect(){
     wantsListening=false;
     mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');
     speechState.textContent='Disconnected';
-    statusEl.textContent='Speech connection failed. Tap the microphone to try again.';
+    statusEl.textContent=input.value==='auto'
+      ?'Automatic detection is unavailable. Try again or choose an input language for compatibility mode.'
+      :'Speech connection failed. Tap the microphone to try again.';
     return;
   }
   reconnectAttempts+=1;
@@ -745,3 +771,4 @@ if(!navigator.mediaDevices?.getDisplayMedia&&meetingSourceBtn){
   meetingSourceBtn.title='Meeting audio capture is available on supported desktop browsers';
   if(audioSourceMode==='meeting'){audioSourceMode='mic';renderAudioSource();}
 }
+

@@ -83,12 +83,13 @@
 
     <section class="card">
       <div class="languageRow">
-        <button class="langBtn" id="inputPicker"><span class="flag" id="inputFlag">🇬🇧</span><span class="langMeta"><span class="langLabel">FROM</span><span class="langName" id="inputName">English</span></span></button>
+        <button class="langBtn" id="inputPicker"><span class="flag" id="inputFlag">🌐</span><span class="langMeta"><span class="langLabel">FROM</span><span class="langName" id="inputName">Auto-detect</span></span></button>
         <button class="swap" id="swap" aria-label="Swap languages">⇄</button>
         <button class="langBtn" id="outputPicker"><span class="flag" id="outputFlag">🇫🇷</span><span class="langMeta"><span class="langLabel">TO</span><span class="langName" id="outputName">French</span></span></button>
       </div>
-      <input type="hidden" id="inputLang" value="en-US" />
+      <input type="hidden" id="inputLang" value="auto" />
       <input type="hidden" id="outputLang" value="fr-FR" />
+      <div class="sourceHint" id="detectedLanguage" role="status" aria-live="polite">Language will be detected as you speak</div>
 
       <div class="sourceMode"><button class="sourceBtn active" id="micSourceBtn" type="button">🎤 Microphone</button><button class="sourceBtn" id="meetingSourceBtn" type="button">🖥️ Meeting audio</button></div>
       <div class="sourceHint" id="sourceHint">Microphone mode listens to your voice.</div>
