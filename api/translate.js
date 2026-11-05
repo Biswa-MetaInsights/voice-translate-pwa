@@ -137,8 +137,10 @@ export default async function handler(req, res) {
       res.setHeader('X-Content-Type-Options','nosniff');
       res.flushHeaders?.();
     }
-    let firstTokenMs=null,usedModel=models[0];
+    let firstTokenMs=null,usedModel=models[0],previousPreview='';
     const options={context,stream:streaming,signal:controller.signal,onProgress:translation=>{
+      if(translation===previousPreview)return;
+      previousPreview=translation;
       if(translation&&firstTokenMs===null)firstTokenMs=Date.now()-started;
       emit({type:'progress',translation});
     }};
@@ -147,7 +149,7 @@ export default async function handler(req, res) {
     } catch (primaryError) {
       if(controller.signal.aborted)throw primaryError;
       console.warn('Primary translation model failed, retrying once');
-      if(streaming)emit({type:'reset'});
+      if(streaming){emit({type:'reset'});previousPreview=''}
       usedModel=models[1];
       result = await gatewayTranslate(token, usedModel, source, target, clean, options);
     }

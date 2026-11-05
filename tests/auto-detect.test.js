@@ -45,7 +45,7 @@ test('auto is rejected as a target and same-language manual input skips the mode
   const same=await request('en-US',[],'Hello');assert.equal(same.res.body.translation,'Hello');assert.equal(same.calls.length,0);
 });
 
-test('input picker offers auto, output excludes it, and detection updates per phrase',()=>{
+test('input picker, per-phrase detection, and history retry do not replay old speech',async()=>{
   const elements=new Map();
   const element=()=>({value:'',textContent:'',children:[],dataset:{},classList:{toggle(){},add(){},remove(){}},
     append(...items){this.children.push(...items)},appendChild(item){this.children.push(item)},
@@ -55,7 +55,7 @@ test('input picker offers auto, output excludes it, and detection updates per ph
   document.getElementById('inputLang').value='auto';document.getElementById('outputLang').value='en-US';
   const context=vm.createContext({document,navigator:{onLine:true,mediaDevices:{}},window:{addEventListener(){}},
     localStorage:{getItem(){return null},setItem(){}},setTimeout,clearTimeout,console,AbortController,
-    OrderedTranslationQueue,requestTranslation,splitPhrases,shouldRecover,speechProviderOptions});
+    OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello',detectedLanguage:'en-US'}),splitPhrases,shouldRecover,speechProviderOptions,performance});
   const frontend=readFileSync(new URL('../src/main.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
   vm.runInContext(frontend,context);
   vm.runInContext("pickerTarget='input';renderLanguagePicker('auto')",context);
@@ -68,4 +68,10 @@ test('input picker offers auto, output excludes it, and detection updates per ph
   vm.runInContext("showDetectedLanguage('nl-NL')",context);
   assert.equal(document.getElementById('detectedLanguage').textContent,'Detected: Dutch');
   assert.equal(vm.runInContext('startBrowserFallback()',context),false);
+  vm.runInContext("var spokenCount=0;speakText=()=>{spokenCount++};liveVoiceEnabled=true;committedTranscript='Bonjour';resetTranslationPipeline(true)",context);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(vm.runInContext('spokenCount',context),0);
+  vm.runInContext("queueFinalTranslation('Salut')",context);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(vm.runInContext('spokenCount',context),1);
 });

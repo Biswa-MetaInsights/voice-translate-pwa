@@ -3,8 +3,19 @@ import assert from 'node:assert/strict';
 import { OrderedTranslationQueue,requestTranslation,splitPhrases } from '../src/translation-client.js';
 import { shouldRecover,speechProviderOptions } from '../src/audio-health.js';
 import { readCompletionStream,translationPrefix } from '../lib/translation-stream.js';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+test('AudioWorklet captures all samples across browser render blocks',()=>{
+  let Processor;const frames=[];
+  const context=vm.createContext({AudioWorkletProcessor:class{constructor(){this.port={postMessage:frame=>frames.push([...frame])}}},registerProcessor:(name,processor)=>{Processor=processor}});
+  vm.runInContext(readFileSync(new URL('../public/pcm-worklet.js',import.meta.url),'utf8'),context);
+  const processor=new Processor();
+  for(let i=0;i<15;i++)processor.process([[new Float32Array(128).fill(i)]]);
+  assert.equal(frames.length,4);assert.equal(frames.flat().length,1920);
+  assert.deepEqual(frames.flat(),Array.from({length:15},(_,i)=>Array(128).fill(i)).flat());
+});
 test('slow earlier phrases do not block the next request or reorder output',async()=>{
   const pending=new Map(),committed=[];
   const queue=new OrderedTranslationQueue({run:job=>new Promise(resolve=>pending.set(job.id,resolve)),onCommit:item=>committed.push(item.result)});

@@ -446,7 +446,7 @@ function resetTranslationPipeline(retranslateHistory=false){
   translatedCommitted='';translatedInterim='';lastInterimText='';lastRequestedText='';lastPreviewAt=0;
   showDetectedLanguage(null);showTranslatedText();translationState.textContent='';
   if('speechSynthesis' in window)speechSynthesis.cancel();
-  if(retranslateHistory&&committedTranscript)queueFinalTranslation(committedTranscript);
+  if(retranslateHistory&&committedTranscript)queueFinalTranslation(committedTranscript,{speak:false});
   if(retranslateHistory&&interimTranscript)scheduleTranslation(interimTranscript);
 }
 function scheduleTranslation(text,immediate=false){
@@ -471,7 +471,7 @@ async function translateText(text){
     translatedInterim=normalizeSpaces(data.translation||'');showTranslatedText();translationState.textContent='Preview';
   }catch(error){if(error.name!=='AbortError'&&epoch===translationEpoch&&seq===translateSequence)lastInterimText=''}
 }
-function queueFinalTranslation(phrase){
+function queueFinalTranslation(phrase,{speak=true}={}){
   const text=normalizeSpaces(phrase||'');if(!text)return;
   ++translateSequence;clearTimeout(translateTimer);
   if(translateController)translateController.abort();translateController=null;
@@ -479,7 +479,7 @@ function queueFinalTranslation(phrase){
   for(const chunk of splitPhrases(text)){
     finalTranslations.push({text:chunk,sourceLanguage:input.value,targetLanguage:output.value,
       quality:document.getElementById('translationQuality').value||'accurate',context:[...recentSourcePhrases],
-      capturedAt:performance.now(),voiceGeneration:liveVoiceGeneration});
+      capturedAt:performance.now(),voiceGeneration:speak?liveVoiceGeneration:-1});
     recentSourcePhrases=[...recentSourcePhrases,chunk].slice(-3);
   }
 }
@@ -536,7 +536,6 @@ async function createMicrophonePcmStream(sessionId){
     if(processorNode.port)processorNode.port.onmessage=e=>receive(e.data);
     else processorNode.onaudioprocess=e=>receive(e.inputBuffer.getChannelData(0));
   },cancel(){audioController=null}});
-  startAudioHealth();
   mediaStream.getAudioTracks().forEach(track=>track.addEventListener('ended',()=>{
     if(wantsListening&&sessionId===transcriptionSession)recoverSpeech();
   },{once:true}));
@@ -692,7 +691,7 @@ async function startListening(isReconnect=false){
     failureStage='token';
     setDiagnostic('token','pending');
     speechController=new AbortController();
-    const tokenTimeout=setTimeout(()=>speechController?.abort(),10_000);
+    const tokenTimeout=setTimeout(()=>speechController?.abort(),20_000);
     let tokenResponse;
     try{tokenResponse=await fetch('/api/transcription-token',{method:'POST',signal:speechController.signal})}finally{clearTimeout(tokenTimeout)}
     const tokenData=await tokenResponse.json().catch(()=>({}));
@@ -702,6 +701,7 @@ async function startListening(isReconnect=false){
     const gateway=createGateway({apiKey:tokenData.token});
     failureStage='realtime';
     setDiagnostic('realtime','pending');
+    startAudioHealth();
     const result=streamTranscribe({
       model:gateway.transcriptionModel('openai/gpt-realtime-whisper'),
       audio:microphoneStream,
