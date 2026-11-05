@@ -1,5 +1,7 @@
 import { experimental_streamTranscribe as streamTranscribe } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
+import { OrderedTranslationQueue, requestTranslation, splitPhrases } from './translation-client.js';
+import { shouldRecover, speechProviderOptions } from './audio-health.js';
 
 const LANGUAGES = [
   {code:'en-US',name:'English',flag:'🇬🇧',region:'Western Europe'},
@@ -69,6 +71,8 @@ const LANGUAGES = [
   {code:'kn-IN',name:'Kannada',flag:'🇮🇳',region:'South Asia'},
   {code:'fil-PH',name:'Filipino (Tagalog)',flag:'🇵🇭',region:'Southeast Asia'}
 ];
+const AUTO_LANGUAGE={code:'auto',name:'Auto-detect',flag:'🌐',region:'Automatic'};
+let detectedInputLanguage=null;
 
 const THEMES = [
   {id:'calm',name:'Calm',desc:'Light, soft and focused',icon:'◌'},
@@ -109,6 +113,29 @@ let translatedCommitted='',translatedInterim='',lastInterimText='',finalPhraseQu
 let liveVoicePauseTimer=null;
 let lastLiveVoiceSource='';
 let audioSourceMode='mic';
+let speechController=null,healthTimer=null,healthStartedAt=0,lastAudioAt=0,lastVoiceAt=0,lastTranscriptAt=0;
+let speechRecoveryRunning=false;
+
+async function recoverSpeech(){
+  if(speechRecoveryRunning||!wantsListening||usingBrowserFallback)return;
+  speechRecoveryRunning=true;
+  ++transcriptionSession;
+  // Keep the most recent partial phrase rather than losing it on recovery.
+  const tail=normalizeSpaces(interimTranscript);
+  if(tail){committedTranscript=normalizeSpaces(committedTranscript+' '+tail);interimTranscript='';queueFinalTranslation(tail);setTranscript(currentTranscript())}
+  setDiagnostic('realtime','error','Speech stalled; restoring the connection');
+  await cleanupAudio();speechRecoveryRunning=false;scheduleReconnect();
+}
+
+function startAudioHealth(){
+  healthStartedAt=lastAudioAt=lastTranscriptAt=Date.now();lastVoiceAt=0;
+  clearInterval(healthTimer);
+  healthTimer=setInterval(()=>{
+    if(!wantsListening||usingBrowserFallback)return;
+    if(shouldRecover({now:Date.now(),lastAudioAt,lastVoiceAt,lastTranscriptAt,startedAt:healthStartedAt,
+      suspended:audioContext?.state==='suspended',hidden:document.hidden}))recoverSpeech();
+  },2000);
+}
 
 function renderDiagnostics(){
   if(!diagnosticEl||!diagnosticBody)return;
@@ -148,7 +175,12 @@ let counts=store.get('vt-counts',{});
 liveVoiceEnabled=store.get('vt-live-voice',false);
 audioSourceMode=store.get('vt-audio-source','mic');
 
-function language(code){return LANGUAGES.find(l=>l.code===code)||LANGUAGES[0]}
+function language(code){return code==='auto'?AUTO_LANGUAGE:LANGUAGES.find(l=>l.code===code)||LANGUAGES[0]}
+function showDetectedLanguage(code){
+  detectedInputLanguage=code==='mixed'||LANGUAGES.some(l=>l.code===code)?code:null;
+  const label=document.getElementById('detectedLanguage');
+  if(label)label.textContent=input.value!=='auto'?'':detectedInputLanguage==='mixed'?'Detected: mixed languages':detectedInputLanguage?'Detected: '+language(detectedInputLanguage).name:'Language will be detected as you speak';
+}
 function normalizeSpaces(v){return v.replace(/\s+/g,' ').trim()}
 function setTranscript(text){transcriptEl.textContent=text||'Your speech will appear here.';transcriptEl.className=text?'textBox':'textBox placeholder';transcriptEl.dir=/^(ar|he|fa|ur)(-|$)/.test(input.value)?'rtl':'auto'}
 function setTranslation(text){translationEl.textContent=text||'Your translation will appear here.';translationEl.className=text?'textBox':'textBox placeholder';translationEl.dir=/^(ar|he|fa|ur)(-|$)/.test(output.value)?'rtl':'auto'}
@@ -164,19 +196,67 @@ function chooseSpeechVoice(lang){
   return voices.find(v=>v.lang?.toLowerCase().startsWith(base))||null;
 }
 
+let activeVoiceAudio=null,voiceRequestController=null,queuedVoiceCount=0;
+let naturalVoicePlayer=null;
+function primeNaturalVoice(){
+  if(typeof Audio==='undefined')return;
+  if(!naturalVoicePlayer)naturalVoicePlayer=new Audio();
+  naturalVoicePlayer.src='data:audio/wav;base64,UklGRiUAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQEAAACA';
+  naturalVoicePlayer.play().catch(()=>{});
+}
+function cancelVoice(){
+  ++liveVoiceGeneration;queuedVoiceCount=0;
+  if(voiceRequestController)voiceRequestController.abort();
+  if(activeVoiceAudio){activeVoiceAudio.pause();activeVoiceAudio.dispatchEvent(new Event('ended'));activeVoiceAudio=null}
+  if('speechSynthesis' in window)speechSynthesis.cancel();
+  liveVoiceQueue=Promise.resolve();
+}
+function deviceSpeak(text,lang){
+  const voice=chooseSpeechVoice(lang);
+  if(!voice||!('SpeechSynthesisUtterance' in window)){
+    statusEl.textContent='No matching device voice. Select Natural voice or another translation language.';return Promise.resolve();
+  }
+  return new Promise(resolve=>{
+    const utterance=new SpeechSynthesisUtterance(text);utterance.lang=lang;utterance.voice=voice;
+    utterance.onend=resolve;utterance.onerror=resolve;
+    speechSynthesis.resume();speechSynthesis.speak(utterance);
+  });
+}
 function speakText(text,{replace=false}={}){
-  const clean=normalizeSpaces(text||'');
-  if(!clean||!('speechSynthesis' in window)||!('SpeechSynthesisUtterance' in window))return false;
-  const utterance=new SpeechSynthesisUtterance(clean);
-  utterance.lang=output.value;
-  const voice=chooseSpeechVoice(output.value);
-  if(voice)utterance.voice=voice;
-  utterance.rate=1;
-  utterance.pitch=1;
-  utterance.volume=1;
-  if(replace)speechSynthesis.cancel();
-  speechSynthesis.resume();
-  speechSynthesis.speak(utterance);
+  const clean=normalizeSpaces(text||'');if(!clean)return false;
+  if(replace){cancelVoice();primeNaturalVoice()}
+  const generation=liveVoiceGeneration,lang=output.value;
+  const natural=document.getElementById('voiceQuality').value!=='device';
+  queuedVoiceCount++;
+  if(queuedVoiceCount>3)liveVoiceState.textContent='Catching up';
+  for(const chunk of splitPhrases(clean))liveVoiceQueue=liveVoiceQueue.catch(()=>{}).then(async()=>{
+    if(generation!==liveVoiceGeneration)return;
+    try{
+      if(!natural){await deviceSpeak(chunk,lang);return}
+      voiceRequestController=new AbortController();
+      const timeout=setTimeout(()=>voiceRequestController?.abort(),12_000);
+      let response;
+      try{response=await fetch('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:chunk}),signal:voiceRequestController.signal})}finally{clearTimeout(timeout)}
+      if(!response.ok)throw new Error('Natural voice unavailable');
+      const blob=await response.blob();
+      if(generation!==liveVoiceGeneration)return;
+      const url=URL.createObjectURL(blob),player=naturalVoicePlayer||new Audio();player.src=url;activeVoiceAudio=player;
+      try{
+        await new Promise((resolve,reject)=>{player.onended=resolve;player.onerror=reject;player.play().catch(reject)});
+      }finally{URL.revokeObjectURL(url);if(activeVoiceAudio===player)activeVoiceAudio=null}
+    }catch(error){
+      if(generation!==liveVoiceGeneration)return;
+      if(error?.name==='NotAllowedError'){
+        liveVoiceEnabled=false;renderLiveVoice();
+        statusEl.textContent='Tap Speak to allow translated voice playback on this device';return;
+      }
+      statusEl.textContent='Natural voice unavailable — using a matching device voice when available';
+      await deviceSpeak(chunk,lang);
+    }finally{
+      if(generation===liveVoiceGeneration){queuedVoiceCount=Math.max(0,queuedVoiceCount-1);renderLiveVoice()}
+    }
+  });
   return true;
 }
 
@@ -193,7 +273,7 @@ function primeSpeechSynthesis(){
 
 function renderLiveVoice(){
   if(!liveVoiceToggle||!liveVoiceState)return;
-  const supported=('speechSynthesis' in window)&&('SpeechSynthesisUtterance' in window);
+  const supported=typeof Audio!=='undefined'||(('speechSynthesis' in window)&&('SpeechSynthesisUtterance' in window));
   liveVoiceToggle.disabled=!supported;
   liveVoiceToggle.checked=supported&&liveVoiceEnabled;
   liveVoiceState.textContent=!supported?'Unavailable':liveVoiceEnabled?'On':'Off';
@@ -230,9 +310,14 @@ function updateLanguageButtons(){
   const a=language(input.value),b=language(output.value);
   document.getElementById('inputFlag').textContent=a.flag;document.getElementById('inputName').textContent=a.name;
   document.getElementById('outputFlag').textContent=b.flag;document.getElementById('outputName').textContent=b.name;
+  const swap=document.getElementById('swap');
+  swap.disabled=input.value==='auto';
+  swap.title=input.value==='auto'?'Choose an input language to swap':'Swap languages';
+  showDetectedLanguage(detectedInputLanguage);
 }
 
 function noteUse(code){
+  if(code==='auto')return;
   counts[code]=(counts[code]||0)+1;store.set('vt-counts',counts);
   recents=[code,...recents.filter(x=>x!==code)].slice(0,6);store.set('vt-recents',recents);
 }
@@ -246,17 +331,20 @@ function renderLanguagePicker(query=''){
   const host=document.getElementById('languageResults');
   const q=query.trim().toLowerCase();
   host.innerHTML='';
-  const filtered=LANGUAGES.filter(l=>!q||l.name.toLowerCase().includes(q)||l.region.toLowerCase().includes(q));
+  const available=pickerTarget==='input'?[AUTO_LANGUAGE,...LANGUAGES]:LANGUAGES;
+  const filtered=available.filter(l=>!q||l.name.toLowerCase().includes(q)||l.region.toLowerCase().includes(q));
   const sections=[];
+  const automatic=filtered.filter(l=>l.code==='auto');
+  if(automatic.length)sections.push(['Automatic',automatic]);
   if(!q){
     const fav=filtered.filter(l=>favorites.includes(l.code));
-    const recent=recents.map(language).filter((l,i,a)=>a.findIndex(x=>x.code===l.code)===i && !favorites.includes(l.code));
+    const recent=recents.filter(code=>available.some(l=>l.code===code)).map(language).filter((l,i,a)=>a.findIndex(x=>x.code===l.code)===i && !favorites.includes(l.code));
     const frequent=[...filtered].filter(l=>(counts[l.code]||0)>0&&!favorites.includes(l.code)&&!recents.includes(l.code)).sort((a,b)=>(counts[b.code]||0)-(counts[a.code]||0)).slice(0,5);
     if(fav.length)sections.push(['Favorites',fav]);
     if(recent.length)sections.push(['Recent',recent]);
     if(frequent.length)sections.push(['Frequently used',frequent]);
   }
-  const regions=[...new Set(filtered.map(l=>l.region))];
+  const regions=[...new Set(filtered.filter(l=>l.code!=='auto').map(l=>l.region))];
   regions.forEach(r=>sections.push([r,filtered.filter(l=>l.region===r)]));
   const seen=new Set();
   for(const [title,items] of sections){
@@ -272,6 +360,7 @@ function renderLanguagePicker(query=''){
       choose.onclick=()=>selectLanguage(l.code);
       const star=document.createElement('button');star.className='starBtn'+(favorites.includes(l.code)?' active':'');star.textContent=favorites.includes(l.code)?'★':'☆';star.setAttribute('aria-label','Favorite '+l.name);
       star.onclick=()=>{favorites=favorites.includes(l.code)?favorites.filter(x=>x!==l.code):[...favorites,l.code];store.set('vt-favorites',favorites);renderLanguagePicker(document.getElementById('languageSearch').value)};
+      if(l.code==='auto'){star.disabled=true;star.textContent='';star.removeAttribute('aria-label')}
       row.append(flag,choose,star);list.appendChild(row);
     });
     host.appendChild(list);
@@ -280,6 +369,8 @@ function renderLanguagePicker(query=''){
 }
 
 async function selectLanguage(code){
+  if(code==='auto'&&pickerTarget!=='input')return;
+  showDetectedLanguage(null);
   const resumeListening=wantsListening&&pickerTarget==='input';
   if(resumeListening)await stopListening(false);
   if(pickerTarget==='input')input.value=code;else output.value=code;
@@ -313,111 +404,86 @@ function floatTo16BitPCM(float32){const buffer=new ArrayBuffer(float32.length*2)
 function resampleTo24k(samples,inputRate){if(inputRate===24000)return samples;const ratio=inputRate/24000,len=Math.max(1,Math.round(samples.length/ratio)),out=new Float32Array(len);for(let i=0;i<len;i++){const p=i*ratio,l=Math.floor(p),r=Math.min(l+1,samples.length-1),f=p-l;out[i]=samples[l]*(1-f)+samples[r]*f}return out}
 
 
-// Translate finalized phrases once, in order. Long conversations never resend the full transcript.
-// Interim previews are optional, throttled and cancellable, leaving room for final phrases.
-function showTranslatedText(){
-  setTranslation(normalizeSpaces(translatedCommitted+' '+translatedInterim));
-}
+// Session content stays in memory. Only the last three source phrases are sent
+// as context; the entire growing conversation is never repeatedly translated.
+let recentSourcePhrases=[],pendingTranslations=0,translationFailures=false;
+const finalTranslations=new OrderedTranslationQueue({
+  run:async(job,signal,onProgress)=>{
+    const started=performance.now();
+    const result=await requestTranslation(job,{signal,onProgress});
+    return {...result,endToEndMs:Math.round(performance.now()-job.capturedAt),requestMs:Math.round(performance.now()-started)};
+  },
+  onProgress:text=>{translatedInterim=normalizeSpaces(text);showTranslatedText()},
+  onPending:count=>{
+    pendingTranslations=count;
+    const el=document.getElementById('queueState');
+    if(el)el.textContent=count>2?'Catching up · '+count+' phrases':count?'Translating…':'';
+  },
+  onCommit:({job,result,error})=>{
+    translatedInterim='';
+    if(error){
+      translationFailures=true;
+      translatedCommitted=normalizeSpaces(translatedCommitted+' ⟦Translation unavailable⟧');
+      translationState.textContent='Some speech needs retrying';
+      document.getElementById('retryTranslation').hidden=false;
+    }else{
+      translatedCommitted=normalizeSpaces(translatedCommitted+' '+result.translation);
+      if(job.sourceLanguage==='auto')showDetectedLanguage(result.detectedLanguage);
+      translationState.textContent=(result.needsReview?'Check unclear phrase · ':'Live · ')+result.endToEndMs+'ms';
+      if(liveVoiceEnabled&&job.voiceGeneration===liveVoiceGeneration)speakText(result.translation);
+    }
+    showTranslatedText();
+  }
+});
+function showTranslatedText(){setTranslation(normalizeSpaces(translatedCommitted+' '+translatedInterim))}
 function resetTranslationPipeline(retranslateHistory=false){
-  ++translationEpoch;
-  ++translateSequence;
+  ++translationEpoch;++translateSequence;cancelVoice();
   clearTimeout(translateTimer);
   if(translateController)translateController.abort();
-  translateController=null;
-  finalPhraseQueue=Promise.resolve();
-  translatedCommitted='';
-  translatedInterim='';
-  lastInterimText='';
-  lastRequestedText='';
-  lastPreviewAt=0;
-  showTranslatedText();
-  translationState.textContent='';
-  if(retranslateHistory&&committedTranscript)queueFinalTranslation(committedTranscript);
+  translateController=null;finalTranslations.clear();
+  recentSourcePhrases=[];translationFailures=false;
+  document.getElementById('retryTranslation').hidden=true;
+  translatedCommitted='';translatedInterim='';lastInterimText='';lastRequestedText='';lastPreviewAt=0;
+  showDetectedLanguage(null);showTranslatedText();translationState.textContent='';
+  if('speechSynthesis' in window)speechSynthesis.cancel();
+  if(retranslateHistory&&committedTranscript)queueFinalTranslation(committedTranscript,{speak:false});
   if(retranslateHistory&&interimTranscript)scheduleTranslation(interimTranscript);
 }
 function scheduleTranslation(text,immediate=false){
-  const clean=normalizeSpaces(text||'');
-  clearTimeout(translateTimer);
-  if(!clean){
-    ++translateSequence;
-    if(translateController)translateController.abort();
-    translateController=null;
-    translatedInterim='';
-    lastInterimText='';
-    showTranslatedText();
-    return;
-  }
-  if(clean===lastInterimText)return;
-  const untilReady=Math.max(0,2000-(Date.now()-lastPreviewAt));
-  translateTimer=setTimeout(()=>translateText(clean),Math.max(immediate?0:350,untilReady));
+  const clean=normalizeSpaces(text||'');clearTimeout(translateTimer);
+  if(!clean||pendingTranslations||clean===lastInterimText)return;
+  // Previews are optional and never compete with completed phrases.
+  const untilReady=Math.max(0,1500-(Date.now()-lastPreviewAt));
+  translateTimer=setTimeout(()=>translateText(clean),Math.max(immediate?0:300,untilReady));
 }
 async function translateText(text){
-  if(!text||text===lastInterimText)return;
-  const epoch=translationEpoch;
-  const seq=++translateSequence;
+  if(!text||text===lastInterimText||pendingTranslations)return;
+  const epoch=translationEpoch,seq=++translateSequence;
   if(translateController)translateController.abort();
-  const controller=new AbortController();
-  translateController=controller;
-  lastInterimText=text;
-  lastPreviewAt=Date.now();
-  translationState.textContent='Translating…';
-  const started=performance.now();
+  const controller=new AbortController();translateController=controller;
+  lastInterimText=text;lastPreviewAt=Date.now();
   try{
-    const response=await fetch('/api/translate',{
-      method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-      body:JSON.stringify({text:text.slice(-2800),sourceLanguage:input.value,targetLanguage:output.value})
-    });
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok)throw new Error(data.error||'Translation failed');
-    if(epoch!==translationEpoch||seq!==translateSequence)return;
-    translatedInterim=normalizeSpaces(data.translation||'');
-    showTranslatedText();
-    translationState.textContent='Preview · '+Math.round(performance.now()-started)+'ms';
-  }catch(error){
-    if(error.name==='AbortError'||epoch!==translationEpoch||seq!==translateSequence)return;
-    lastInterimText='';
-    console.warn('Interim translation unavailable:',error);
-    translationState.textContent='Listening';
+    const data=await requestTranslation({text:text.slice(-2400),sourceLanguage:input.value,targetLanguage:output.value,quality:'fast',context:recentSourcePhrases},
+      {signal:controller.signal,onProgress:translation=>{
+        if(epoch===translationEpoch&&seq===translateSequence&&!pendingTranslations){translatedInterim=translation;showTranslatedText()}
+      }});
+    if(epoch!==translationEpoch||seq!==translateSequence||pendingTranslations)return;
+    translatedInterim=normalizeSpaces(data.translation||'');showTranslatedText();translationState.textContent='Preview';
+  }catch(error){if(error.name!=='AbortError'&&epoch===translationEpoch&&seq===translateSequence)lastInterimText=''}
+}
+function queueFinalTranslation(phrase,{speak=true}={}){
+  const text=normalizeSpaces(phrase||'');if(!text)return;
+  ++translateSequence;clearTimeout(translateTimer);
+  if(translateController)translateController.abort();translateController=null;
+  lastInterimText='';translatedInterim='';showTranslatedText();
+  for(const chunk of splitPhrases(text)){
+    finalTranslations.push({text:chunk,sourceLanguage:input.value,targetLanguage:output.value,
+      quality:document.getElementById('translationQuality').value||'accurate',context:[...recentSourcePhrases],
+      capturedAt:performance.now(),voiceGeneration:speak?liveVoiceGeneration:-1});
+    recentSourcePhrases=[...recentSourcePhrases,chunk].slice(-3);
   }
 }
-function queueFinalTranslation(phrase){
-  const text=normalizeSpaces(phrase||'');
-  if(!text)return;
-  const epoch=translationEpoch;
-  const voiceGeneration=liveVoiceGeneration;
-  const sourceLanguage=input.value,targetLanguage=output.value;
-  ++translateSequence;
-  clearTimeout(translateTimer);
-  if(translateController)translateController.abort();
-  translateController=null;
-  lastInterimText='';
-  translatedInterim='';
-  showTranslatedText();
-  translationState.textContent='Translating…';
-  finalPhraseQueue=finalPhraseQueue.catch(()=>{}).then(async()=>{
-    if(epoch!==translationEpoch)return;
-    const started=performance.now();
-    try{
-      const response=await fetch('/api/translate',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({text:text.slice(-2800),sourceLanguage,targetLanguage})
-      });
-      const data=await response.json().catch(()=>({}));
-      if(!response.ok)throw new Error(data.error||'Translation failed');
-      if(epoch!==translationEpoch)return;
-      const translated=normalizeSpaces(data.translation||'');
-      if(!translated)return;
-      translatedCommitted=normalizeSpaces(translatedCommitted+' '+translated);
-      showTranslatedText();
-      translationState.textContent=(isListening?'Live':'Ready')+' · '+Math.round(performance.now()-started)+'ms';
-      if(liveVoiceEnabled&&voiceGeneration===liveVoiceGeneration)speakText(translated);
-    }catch(error){
-      if(epoch!==translationEpoch)return;
-      console.warn('Final translation failed:',error);
-      translationState.textContent='Translation unavailable — listening continues';
-    }
-  });
-}
+document.getElementById('retryTranslation').onclick=()=>resetTranslationPipeline(true);
 
 async function createMicrophonePcmStream(sessionId){
   // Request capture before awaiting the network token: iOS requires a user gesture.
@@ -430,7 +496,8 @@ async function createMicrophonePcmStream(sessionId){
       throw new Error('No meeting audio was shared. Choose the meeting tab/screen and enable Share audio.');
     }
   }else{
-    capturedStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+    capturedStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,
+      autoGainControl:document.getElementById('audioProfile').value!=='nearby'},video:false});
   }
   // A delayed permission prompt must not revive a stopped recording.
   if(!wantsListening||sessionId!==transcriptionSession){
@@ -447,13 +514,39 @@ async function createMicrophonePcmStream(sessionId){
     cancelled.name='AbortError';
     throw cancelled;
   }
-  sourceNode=audioContext.createMediaStreamSource(mediaStream);processorNode=audioContext.createScriptProcessor(4096,1,1);muteNode=audioContext.createGain();muteNode.gain.value=0;
-  const pcmStream=new ReadableStream({start(controller){audioController=controller;processorNode.onaudioprocess=e=>{if(!isListening||!audioController)return;const pcm=floatTo16BitPCM(resampleTo24k(e.inputBuffer.getChannelData(0),audioContext.sampleRate));try{controller.enqueue(pcm)}catch{}}},cancel(){audioController=null}});
+  sourceNode=audioContext.createMediaStreamSource(mediaStream);
+  if(audioContext.audioWorklet&&typeof AudioWorkletNode!=='undefined'){
+    await audioContext.audioWorklet.addModule('/pcm-worklet.js');
+    if(!wantsListening||sessionId!==transcriptionSession)throw new DOMException('Capture cancelled','AbortError');
+    processorNode=new AudioWorkletNode(audioContext,'pcm-capture');
+  }else processorNode=audioContext.createScriptProcessor(1024,1,1);
+  muteNode=audioContext.createGain();muteNode.gain.value=0;
+  const pcmStream=new ReadableStream({start(controller){
+    audioController=controller;
+    const receive=samples=>{
+      if(!isListening||!audioController||sessionId!==transcriptionSession)return;
+      lastAudioAt=Date.now();
+      let energy=0;for(const sample of samples)energy+=sample*sample;
+      if(Math.sqrt(energy/samples.length)>0.015)lastVoiceAt=lastAudioAt;
+      const pcm=floatTo16BitPCM(resampleTo24k(samples,audioContext.sampleRate));
+      // Bound pre-connection buffering to about two seconds.
+      if(controller.desiredSize<-100)return;
+      try{controller.enqueue(pcm)}catch{}
+    };
+    if(processorNode.port)processorNode.port.onmessage=e=>receive(e.data);
+    else processorNode.onaudioprocess=e=>receive(e.inputBuffer.getChannelData(0));
+  },cancel(){audioController=null}});
+  mediaStream.getAudioTracks().forEach(track=>track.addEventListener('ended',()=>{
+    if(wantsListening&&sessionId===transcriptionSession)recoverSpeech();
+  },{once:true}));
   sourceNode.connect(processorNode);processorNode.connect(muteNode);muteNode.connect(audioContext.destination);return pcmStream;
 }
 
 async function cleanupAudio(){
   isListening=false;
+  clearInterval(healthTimer);healthTimer=null;
+  if(speechController){speechController.abort();speechController=null}
+  if(processorNode?.port){processorNode.port.onmessage=null;processorNode.port.close()}
   if(processorNode){processorNode.onaudioprocess=null;try{processorNode.disconnect()}catch{}}
   if(sourceNode){try{sourceNode.disconnect()}catch{}}
   if(muteNode){try{muteNode.disconnect()}catch{}}
@@ -468,6 +561,10 @@ function browserSpeechSupported(){
 }
 
 function startBrowserFallback(){
+  if(input.value==='auto'){
+    setDiagnostic('fallback','error','Automatic detection needs the realtime speech service');
+    return false;
+  }
   if(audioSourceMode==='meeting'){setDiagnostic('fallback','error','Meeting audio requires realtime capture');return false;}
   if(!wantsListening||usingBrowserFallback||!browserSpeechSupported()){setDiagnostic('fallback','error','Browser speech fallback unavailable');return false;}
   const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -549,7 +646,9 @@ function scheduleReconnect(){
     wantsListening=false;
     mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');
     speechState.textContent='Disconnected';
-    statusEl.textContent='Speech connection failed. Tap the microphone to try again.';
+    statusEl.textContent=input.value==='auto'
+      ?'Automatic detection is unavailable. Try again or choose an input language for compatibility mode.'
+      :'Speech connection failed. Tap the microphone to try again.';
     return;
   }
   reconnectAttempts+=1;
@@ -591,7 +690,10 @@ async function startListening(isReconnect=false){
 
     failureStage='token';
     setDiagnostic('token','pending');
-    const tokenResponse=await fetch('/api/transcription-token',{method:'POST'});
+    speechController=new AbortController();
+    const tokenTimeout=setTimeout(()=>speechController?.abort(),20_000);
+    let tokenResponse;
+    try{tokenResponse=await fetch('/api/transcription-token',{method:'POST',signal:speechController.signal})}finally{clearTimeout(tokenTimeout)}
     const tokenData=await tokenResponse.json().catch(()=>({}));
     if(!wantsListening||sessionId!==transcriptionSession)return;
     if(!tokenResponse.ok||!tokenData.token){const detail=tokenData.detail?': '+tokenData.detail:'';throw new Error((tokenData.error||'Speech service unavailable')+detail+' (HTTP '+tokenResponse.status+')');}
@@ -599,10 +701,13 @@ async function startListening(isReconnect=false){
     const gateway=createGateway({apiKey:tokenData.token});
     failureStage='realtime';
     setDiagnostic('realtime','pending');
+    startAudioHealth();
     const result=streamTranscribe({
       model:gateway.transcriptionModel('openai/gpt-realtime-whisper'),
       audio:microphoneStream,
-      inputAudioFormat:{type:'audio/pcm',rate:24000}
+      inputAudioFormat:{type:'audio/pcm',rate:24000},
+      providerOptions:speechProviderOptions(input.value),
+      abortSignal:speechController.signal
     });
 
     let receivedRealtimeEvent=false;
@@ -617,6 +722,7 @@ async function startListening(isReconnect=false){
         setDiagnostic('realtime','ok');
       }
       if(!wantsListening||sessionId!==transcriptionSession)break;
+      if(part.type==='transcript-delta'||part.type==='transcript-partial'||part.type==='transcript-final')lastTranscriptAt=Date.now();
       if(part.type==='transcript-delta'){
         interimTranscript+=part.delta||'';
         const visible=currentTranscript();setTranscript(visible);
@@ -628,6 +734,9 @@ async function startListening(isReconnect=false){
         interimTranscript='';
         const visible=currentTranscript();setTranscript(visible);
         speechState.textContent='Captured';queueFinalTranslation(finalText);
+      }
+      if(part.type==='transcript-partial'){
+        interimTranscript=part.text||'';setTranscript(currentTranscript());scheduleTranslation(interimTranscript);
       }
       if(part.type==='error')throw new Error(part.error?.message||part.message||'Speech connection interrupted');
     }
@@ -693,6 +802,7 @@ async function stopListening(updateUi=true){
 
 mic.onclick=async()=>{
   if(wantsListening){await stopListening(true);return}
+  if(liveVoiceEnabled){primeNaturalVoice();primeSpeechSynthesis()}
   wantsListening=true;
   usingBrowserFallback=false;
   reconnectAttempts=0;
@@ -700,17 +810,17 @@ mic.onclick=async()=>{
   await startListening(false);
 };
 document.getElementById('swap').onclick=async()=>{const resumeListening=wantsListening;if(resumeListening)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);resetTranslationPipeline(true);if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}};
-document.getElementById('clear').onclick=()=>{committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';++liveVoiceGeneration;resetTranslationPipeline();clearTimeout(liveVoicePauseTimer);if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript('');setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
+document.getElementById('clear').onclick=()=>{committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';cancelVoice();resetTranslationPipeline();clearTimeout(liveVoicePauseTimer);if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript('');setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
 copyBtn.onclick=async()=>{if(translationEl.classList.contains('placeholder'))return;try{await navigator.clipboard.writeText(translationEl.textContent);statusEl.textContent='Translation copied'}catch{statusEl.textContent='Copy failed'}};
 speakBtn.onclick=()=>{if(translationEl.classList.contains('placeholder'))return;speakText(translationEl.textContent,{replace:true})};
 if(liveVoiceToggle){
   liveVoiceToggle.onchange=()=>{
     liveVoiceEnabled=Boolean(liveVoiceToggle.checked);
     store.set('vt-live-voice',liveVoiceEnabled);
-    ++liveVoiceGeneration;
+    cancelVoice();
     lastLiveVoiceSource=currentTranscript();
     clearTimeout(liveVoicePauseTimer);
-    if(liveVoiceEnabled)primeSpeechSynthesis();
+    if(liveVoiceEnabled){primeSpeechSynthesis();primeNaturalVoice()}
     else if('speechSynthesis' in window)speechSynthesis.cancel();
     renderLiveVoice();
     statusEl.textContent=liveVoiceEnabled?'Live translated voice is on — pause briefly after each phrase':'Live translated voice is off';
@@ -731,6 +841,23 @@ window.addEventListener('online',()=>{
   else if(!wantsListening)statusEl.textContent='Back online — ready to listen';
 });
 window.addEventListener('beforeunload',()=>{if(mediaStream)mediaStream.getTracks().forEach(t=>t.stop())});
+document.addEventListener('visibilitychange',async()=>{
+  if(document.hidden||!wantsListening||usingBrowserFallback)return;
+  if(audioContext?.state==='suspended')try{await audioContext.resume()}catch{}
+  if(!isListening){reconnectAttempts=0;scheduleReconnect()}
+  else if(Date.now()-lastAudioAt>8000)recoverSpeech();
+});
+for(const [id,key,fallback] of [['translationQuality','vt-quality','accurate'],['voiceQuality','vt-voice-quality','natural'],['audioProfile','vt-audio-profile','standard']]){
+  const control=document.getElementById(id);
+  control.value=store.get(key,fallback);
+  control.onchange=async()=>{
+    store.set(key,control.value);
+    if(id==='voiceQuality')cancelVoice();
+    if(id==='audioProfile'&&wantsListening){
+      await stopListening(true);wantsListening=true;reconnectAttempts=0;await startListening(false);
+    }
+  };
+}
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'));
 
 if(micSourceBtn)micSourceBtn.onclick=()=>setAudioSource('mic');
@@ -745,3 +872,4 @@ if(!navigator.mediaDevices?.getDisplayMedia&&meetingSourceBtn){
   meetingSourceBtn.title='Meeting audio capture is available on supported desktop browsers';
   if(audioSourceMode==='meeting'){audioSourceMode='mic';renderAudioSource();}
 }
+
