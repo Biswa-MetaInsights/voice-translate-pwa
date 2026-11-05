@@ -59,6 +59,12 @@
     .btn{min-height:52px;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:16px;font-weight:850}
     .btn.primary{background:var(--accent);color:var(--accentText);border-color:transparent}
     .hint{text-align:center;color:var(--muted);font-size:.76rem;margin-top:17px}
+    .settings{margin-top:14px;border:1px solid var(--line);border-radius:16px;padding:12px;background:var(--surface)}
+    .settings summary{cursor:pointer;font-size:.84rem;font-weight:800;color:var(--accent);min-height:28px}
+    .settings label{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:.8rem;margin-top:12px}
+    .settings select{max-width:64%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface2);color:var(--text);font:inherit}
+    .settings p{font-size:.74rem;line-height:1.45;color:var(--muted)}
+    .swap:disabled{opacity:.4;cursor:default}
     .sheetBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:flex-end;z-index:30}
     .sheetBackdrop.open{display:flex}
     .sheet{width:100%;max-width:720px;margin:0 auto;background:var(--bg);color:var(--text);border-radius:28px 28px 0 0;padding:14px 14px max(22px,env(safe-area-inset-bottom));max-height:88vh;overflow:auto;box-shadow:0 -20px 50px rgba(0,0,0,.18)}
@@ -93,12 +99,20 @@
 
       <div class="sourceMode"><button class="sourceBtn active" id="micSourceBtn" type="button">🎤 Microphone</button><button class="sourceBtn" id="meetingSourceBtn" type="button">🖥️ Meeting audio</button></div>
       <div class="sourceHint" id="sourceHint">Microphone mode listens to your voice.</div>
+      <details class="settings"><summary>Conversation settings</summary>
+        <label>Translation <select id="translationQuality"><option value="accurate">High accuracy</option><option value="fast">Faster responses</option></select></label>
+        <label>Voice <select id="voiceQuality"><option value="natural">Natural voice · online</option><option value="device">Device voice · faster</option></select></label>
+        <label>Microphone <select id="audioProfile"><option value="standard">Standard</option><option value="nearby">Nearby speaker</option></select></label>
+        <p>High accuracy uses more processing. Nearby speaker reduces automatic microphone gain; keep your phone close to the person you want to hear. Overlapping voices can still be mixed.</p>
+      </details>
       <div class="micWrap">
         <button class="mic" id="mic" aria-label="Start listening" aria-pressed="false">🎤</button>
         <div class="status" id="status" role="status" aria-live="polite">Tap the microphone and start speaking</div>
         <div class="engine" id="engineBadge">Ready to listen</div><div class="diagnostic" id="diagnostic"><div class="diagTitle">Speech diagnostics</div><div id="diagnosticBody">Waiting for microphone test.</div></div>
       </div>
 
+      <div class="sourceHint" id="queueState" role="status" aria-live="polite"></div>
+      <button class="btn" id="retryTranslation" type="button" hidden>Retry missing translations</button>
       <div class="panel"><div class="sectionTitle"><span>Live transcription</span><span class="smallStatus" id="speechState"></span></div><div class="textBox placeholder" id="transcript">Your speech will appear here.</div></div>
       <div class="panel"><div class="sectionTitle"><span>Live translation</span><span class="smallStatus" id="translationState"></span></div><div class="textBox placeholder" id="translation">Your translation will appear here.</div><div class="liveVoiceRow"><div class="liveVoiceCopy"><span style="font-size:22px">🔊</span><div><strong>Live translated voice <span class="liveVoiceState" id="liveVoiceState">Off</span></strong><small>Automatically speak each completed translated phrase</small></div></div><label class="switch" aria-label="Live translated voice"><input type="checkbox" id="liveVoiceToggle"><span class="slider"></span></label></div><div class="actions"><button class="btn" id="copy">Copy</button><button class="btn primary" id="speak">🔊 Speak</button><button class="btn" id="clear">Clear</button></div></div>
     </section>

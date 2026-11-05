@@ -1,0 +1,9 @@
+[
+  {"id":"dutch-time-negation","sourceLanguage":"nl-NL","targetLanguage":"en-US","text":"Ik kom niet vandaag, maar morgen om half drie.","review":"Must preserve not today, tomorrow, and 2:30 (not 3:30)."},
+  {"id":"french-date","sourceLanguage":"fr-FR","targetLanguage":"en-US","text":"La réunion est reportée au 12 novembre à 15 h 30.","review":"Meeting postponed to November 12 at 15:30 / 3:30 PM."},
+  {"id":"german-numbers","sourceLanguage":"de-DE","targetLanguage":"en-US","text":"Es sind nicht fünfzehn, sondern fünfzig Euro.","review":"Must preserve not fifteen, but fifty euros."},
+  {"id":"malayalam-negation","sourceLanguage":"ml-IN","targetLanguage":"en-US","text":"ഞാൻ ഇന്ന് വരില്ല. നാളെ രാവിലെ പത്ത് മണിക്ക് വരാം.","review":"Not coming today; can come tomorrow at ten in the morning. Native-speaker review required."},
+  {"id":"arabic-booking","sourceLanguage":"ar-SA","targetLanguage":"en-US","text":"لا تلغِ الحجز. غيّر الموعد إلى يوم الجمعة الساعة العاشرة صباحًا.","review":"Do not cancel booking; change to Friday at ten in the morning. Native-speaker review required."},
+  {"id":"filipino-booking","sourceLanguage":"fil-PH","targetLanguage":"en-US","text":"Huwag kanselahin ang booking. Ilipat ito sa Biyernes ng alas-diyes ng umaga.","review":"Do not cancel booking; move to Friday at ten in the morning. Native-speaker review required."},
+  {"id":"mixed-french-english","sourceLanguage":"auto","targetLanguage":"en-US","text":"La réunion est demain, but please don't invite Paul.","review":"Meeting tomorrow; do not invite Paul. Detection should allow mixed languages."}
+]

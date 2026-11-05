@@ -2,13 +2,16 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readCompletionStream, translationPrefix } from '../lib/translation-stream.js';
+import { OrderedTranslationQueue,requestTranslation,splitPhrases } from '../src/translation-client.js';
+import { shouldRecover,speechProviderOptions } from '../src/audio-health.js';
 
 const backend=readFileSync(new URL('../api/translate.js',import.meta.url),'utf8')
-  .replace(/^import .*;\n/,'').replace('export default async function handler','async function handler');
+  .replace(/^import .*;\n/gm,'').replace('export default async function handler','async function handler');
 
 async function request(sourceLanguage, replies, text='Bonjour', targetLanguage='en-US'){
   const calls=[];
-  const context=vm.createContext({console,process:{env:{AI_GATEWAY_API_KEY:'test'}},AbortSignal,
+  const context=vm.createContext({console,process:{env:{AI_GATEWAY_API_KEY:'test'}},AbortSignal,AbortController,readCompletionStream,translationPrefix,
     fetch:async(url,options)=>{calls.push(JSON.parse(options.body));return {ok:true,json:async()=>({choices:[{message:{content:replies.shift()}}]})}}});
   vm.runInContext(backend,context);
   const res={statusCode:200,setHeader(){},status(code){this.statusCode=code;return this},json(body){this.body=body;return this}};
@@ -20,7 +23,7 @@ test('auto source returns translation and language in one model call',async()=>{
   const {res,calls}=await request('auto',['{"translation":"Hello","detectedLanguage":"fr-FR"}']);
   assert.equal(res.statusCode,200);assert.equal(res.body.translation,'Hello');
   assert.equal(res.body.detectedLanguage,'fr-FR');assert.equal(calls.length,1);
-  assert.match(calls[0].messages[0].content,/Detect the source language/);
+  assert.match(calls[0].messages[0].content,/automatically detected speech/);
 });
 test('mixed languages and uncertain detection are accepted',async()=>{
   for(const detectedLanguage of ['mixed',null,'unsupported']){
@@ -48,10 +51,11 @@ test('input picker offers auto, output excludes it, and detection updates per ph
     append(...items){this.children.push(...items)},appendChild(item){this.children.push(item)},
     setAttribute(){},removeAttribute(){},addEventListener(){},set innerHTML(value){this.children=[]},get innerHTML(){return ''}});
   const document={getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id)},
-    createElement:element,querySelectorAll:()=>[],documentElement:{dataset:{}}};
+    createElement:element,querySelectorAll:()=>[],documentElement:{dataset:{}},addEventListener(){}};
   document.getElementById('inputLang').value='auto';document.getElementById('outputLang').value='en-US';
   const context=vm.createContext({document,navigator:{onLine:true,mediaDevices:{}},window:{addEventListener(){}},
-    localStorage:{getItem(){return null},setItem(){}},setTimeout,clearTimeout,console});
+    localStorage:{getItem(){return null},setItem(){}},setTimeout,clearTimeout,console,AbortController,
+    OrderedTranslationQueue,requestTranslation,splitPhrases,shouldRecover,speechProviderOptions});
   const frontend=readFileSync(new URL('../src/main.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
   vm.runInContext(frontend,context);
   vm.runInContext("pickerTarget='input';renderLanguagePicker('auto')",context);
