@@ -1,0 +1,38 @@
+[
+  {
+    "version": "original",
+    "tailDelayMs": 250,
+    "elapsedMs": 252.49,
+    "cancelled": false
+  },
+  {
+    "version": "original",
+    "tailDelayMs": 250,
+    "elapsedMs": 250.61,
+    "cancelled": false
+  },
+  {
+    "version": "original",
+    "tailDelayMs": 250,
+    "elapsedMs": 250.61,
+    "cancelled": false
+  },
+  {
+    "version": "changed",
+    "tailDelayMs": 250,
+    "elapsedMs": 0.41,
+    "cancelled": true
+  },
+  {
+    "version": "changed",
+    "tailDelayMs": 250,
+    "elapsedMs": 0.09,
+    "cancelled": true
+  },
+  {
+    "version": "changed",
+    "tailDelayMs": 250,
+    "elapsedMs": 0.06,
+    "cancelled": true
+  }
+]
