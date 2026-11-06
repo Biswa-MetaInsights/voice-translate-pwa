@@ -9,6 +9,7 @@ async function streamRequest({replies,context=[],quality='accurate',sourceLangua
   const calls=[],lines=[];
   const sandbox=vm.createContext({console,process:{env:{AI_GATEWAY_API_KEY:'test'}},AbortController,AbortSignal,readCompletionStream,translationPrefix,
     fetch:async(url,options)=>{
+      assert.equal(lines[0]?.type,'start','send initial body before provider work');
       calls.push(JSON.parse(options.body));const reply=replies.shift();
       if(reply instanceof Error)throw reply;
       const chunks=typeof reply==='string'?[reply]:reply;
@@ -24,17 +25,26 @@ async function streamRequest({replies,context=[],quality='accurate',sourceLangua
 test('streamed API emits readable progress before completion and caps context',async()=>{
   const {calls,lines,res}=await streamRequest({replies:[['{"translation":"Hel','lo","detectedLanguage":"fr-FR","needsReview":false}']],context:['ignored','a'.repeat(900),'b','c']});
   assert.equal(res.writableEnded,true);
-  assert.equal(lines[0].type,'progress');assert.equal(lines[0].translation,'Hel');
+  assert.equal(lines[0].type,'start');
+  assert.equal(lines[1].type,'progress');assert.equal(lines[1].translation,'Hel');
   assert.equal(lines.at(-1).type,'done');assert.equal(lines.at(-1).result.translation,'Hello');
   assert.equal(calls[0].model,'openai/gpt-5.6-sol');
   const prior=JSON.parse(calls[0].messages[1].content).previousTranscript;
   assert.equal(prior.length,3);assert.equal(prior[0].length,600);
-  assert.ok(lines.at(-1).result.metrics.totalMs>=0);
+  const metrics=lines.at(-1).result.metrics;
+  assert.ok(metrics.totalMs>=0);assert.equal(metrics.firstInvocation,true);
+  assert.equal(metrics.attempts.length,1);assert.equal(metrics.attempts[0].outcome,'success');
+  assert.ok(metrics.attempts[0].headersMs>=0);assert.ok(metrics.attempts[0].firstContentMs>=0);
+  assert.ok(metrics.attempts[0].firstByteMs>=metrics.attempts[0].headersMs);
+  assert.ok(metrics.attempts[0].firstContentMs>=metrics.attempts[0].firstByteMs);
+  assert.doesNotMatch(JSON.stringify(metrics),/Bonjour|Hello|secret-test/);
 });
 test('fast mode selects a faster model and invalid primary resets partial output',async()=>{
   const {calls,lines}=await streamRequest({quality:'fast',replies:['{"translation":"unfinished','{"translation":"Hello","detectedLanguage":"fr-FR"}']});
   assert.equal(calls[0].model,'openai/gpt-5.4-mini');assert.equal(calls[1].model,'openai/gpt-5.6-sol');
   assert.ok(lines.some(x=>x.type==='reset'));assert.equal(lines.at(-1).result.translation,'Hello');
+  const attempts=lines.at(-1).result.metrics.attempts;
+  assert.equal(attempts.length,2);assert.equal(attempts[0].outcome,'error');assert.equal(attempts[1].outcome,'success');
 });
 test('both provider failures produce a visible stream error, not a silent success',async()=>{
   const {lines}=await streamRequest({replies:[new Error('unavailable'),new Error('unavailable')]});

@@ -1,0 +1,11 @@
+{
+  "node": "v24.22.1",
+  "freshProcessImportMs": [
+    85.68,
+    60.36,
+    51.31,
+    50.14,
+    46.99
+  ],
+  "platformInitializationIncluded": false
+}

@@ -72,7 +72,7 @@ export async function requestTranslation(payload,{signal,onProgress=()=>{},fetch
     if(event.type==='done')result=event.result;
   };
   try{
-    while(true){
+    while(!result){
       const {value,done}=await reader.read();
       buffer+=decoder.decode(value,{stream:!done});
       let newline;while((newline=buffer.indexOf('\n'))>=0){accept(buffer.slice(0,newline));buffer=buffer.slice(newline+1)}
