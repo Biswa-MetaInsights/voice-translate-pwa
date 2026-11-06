@@ -25,11 +25,9 @@ function allowed(req) {
 }
 
 function safeError(error) {
-  const message = String(error?.message || error || 'Unknown AI Gateway error')
-    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]')
-    .slice(0, 220);
   const status = Number(error?.statusCode || error?.status || error?.response?.status || 0) || undefined;
-  return { message, status };
+  // Upstream messages can contain credential fragments. Never return or log them.
+  return { status };
 }
 
 async function resolveGatewayCredential() {
@@ -99,7 +97,7 @@ export default async function handler(req, res) {
     console.error('Failed to create transcription token:', info);
     return res.status(503).json({
       error: 'Speech token service failed',
-      detail: info.message,
+      detail: 'The speech service is temporarily unavailable. Please try again.',
       code: 'gateway_token_failed',
       upstreamStatus: info.status,
     });

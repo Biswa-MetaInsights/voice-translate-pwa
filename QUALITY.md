@@ -23,3 +23,12 @@ Conversation text is held in page memory. Only three bounded recent source phras
 ## Performance investigation — 6 November 2026 (review only)
 
 See [PERFORMANCE.md](PERFORMANCE.md) for public-endpoint measurements, the proxy/TLS contribution, controlled completion-tail improvement and limitations. The proposed changes pass 25 Node tests and the production build. Live deployment requires explicit approval. The benchmark now logs timings only and supports fresh curl connections or a reused fetch pool; it no longer prints translated text.
+
+## Reliability fixes — 6 November 2026 (pending release)
+
+- 38 tests pass and the Vite production build succeeds. Thirteen new regression checks fail against the preceding main commit and pass with these fixes.
+- Translation JSON, speech-token JSON and natural-voice audio retain cancellation/timeouts through response-body download.
+- Cleanup, stop, failed sessions and watchdog recovery cannot erase or overwrite a newer microphone session. PCM cancellation only releases its own controller.
+- Stale browser speech callbacks are ignored and disconnected on stop. Unfinished phrases are committed before capture changes. Backlog coalescing preserves silent-history versus live-voice settings, and the voice counter counts all chunks.
+- Blocked/quota-limited preference storage no longer interrupts language changes. Upstream transcription-token error messages are excluded from logs and client responses; only a safe HTTP status is retained.
+- The existing live language picker was exercised in a cloud browser. No app-origin console errors were observed; browser-extension metadata errors were unrelated. These checks do not establish real iPhone microphone behavior, human-accent accuracy or removal of the previously observed first-connection transport delay.
