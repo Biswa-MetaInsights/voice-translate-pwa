@@ -135,3 +135,35 @@ test('old watchdog recovery cannot schedule reconnects for a newer session',asyn
   run('audioContext=oldContext;wantsListening=true;var reconnects=0;scheduleReconnect=()=>reconnects++;var recovery=recoverSpeech();++transcriptionSession');
   closeOld();await run('recovery');assert.equal(run('reconnects'),0);
 });
+
+test('browser fallback preserves an interim phrase delivered alongside a final phrase',async()=>{
+  const instances=[];
+  class Recognition{constructor(){instances.push(this)}start(){}stop(){}}
+  const {run}=app({window:{addEventListener(){},SpeechRecognition:Recognition}});
+  run('wantsListening=true;var queued=[];queueFinalTranslation=text=>queued.push(text);startBrowserFallback()');
+  instances[0].onresult({resultIndex:0,results:[
+    Object.assign([{transcript:'Finished sentence.'}],{isFinal:true}),
+    Object.assign([{transcript:'Next unfinished phrase'}],{isFinal:false})
+  ]});
+  assert.equal(run('currentTranscript()'),'Finished sentence. Next unfinished phrase');
+  await run('stopListening(false)');
+  assert.equal(run('committedTranscript'),'Finished sentence. Next unfinished phrase');
+  assert.equal(run('queued[1]'),'Next unfinished phrase');
+});
+
+test('stale realtime frames cannot reset diagnostics or retry counts for a new session',async()=>{
+  let release;
+  const {run}=app({navigator:{onLine:true,mediaDevices:{getUserMedia(){}}},
+    fetch:async()=>({ok:true,json:async()=>({token:'SYNTHETIC'})}),
+    createGateway:()=>({transcriptionModel:()=>({})}),
+    streamTranscribe:()=>({fullStream:(async function*(){await new Promise(resolve=>{release=resolve});yield {type:'transcript-final',text:'STALE'};})()})});
+  run('createMicrophonePcmStream=async()=>null;wantsListening=true;startAudioHealth=()=>{};var oldSession=startListening()');
+  await tick();
+  run("++transcriptionSession;reconnectAttempts=2;diagnosticState.realtime='pending'");
+  release();await run('oldSession');
+  const attempts=run('reconnectAttempts'),state=run('diagnosticState.realtime'),transcript=run('committedTranscript');
+  await run('stopListening(false)');
+  assert.equal(attempts,2);
+  assert.equal(state,'pending');
+  assert.equal(transcript,'');
+});
