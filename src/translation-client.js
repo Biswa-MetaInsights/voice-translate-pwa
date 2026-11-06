@@ -7,7 +7,7 @@ export class OrderedTranslationQueue {
   }
   push(job) {
     const tail=this.pending.at(-1);
-    if(tail&&tail.sourceLanguage===job.sourceLanguage&&tail.targetLanguage===job.targetLanguage&&tail.quality===job.quality&&tail.text.length+job.text.length+1<=2800){
+    if(tail&&tail.sourceLanguage===job.sourceLanguage&&tail.targetLanguage===job.targetLanguage&&tail.quality===job.quality&&tail.voiceGeneration===job.voiceGeneration&&tail.text.length+job.text.length+1<=2800){
       tail.text+=' '+job.text;
     }else this.pending.push({...job,id:this.nextId++});
     this.pump();
@@ -61,7 +61,7 @@ export async function requestTranslation(payload,{signal,onProgress=()=>{},fetch
     body:JSON.stringify({...payload,stream:true})
   });
   if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.error||'Translation failed')}
-  if(!response.headers.get('content-type')?.includes('application/x-ndjson'))return response.json();
+  if(!response.headers.get('content-type')?.includes('application/x-ndjson'))return await response.json();
   const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',result;
   const accept=line=>{
     if(!line.trim())return;

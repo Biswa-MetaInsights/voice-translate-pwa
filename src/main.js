@@ -124,7 +124,9 @@ async function recoverSpeech(){
   const tail=normalizeSpaces(interimTranscript);
   if(tail){committedTranscript=normalizeSpaces(committedTranscript+' '+tail);interimTranscript='';queueFinalTranslation(tail);setTranscript(currentTranscript())}
   setDiagnostic('realtime','error','Speech stalled; restoring the connection');
-  await cleanupAudio();speechRecoveryRunning=false;scheduleReconnect();
+  const recoverySession=transcriptionSession;
+  await cleanupAudio();speechRecoveryRunning=false;
+  if(recoverySession===transcriptionSession)scheduleReconnect();
 }
 
 function startAudioHealth(){
@@ -166,7 +168,7 @@ const MAX_RECONNECTS=3;
 
 const store={
   get(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}},
-  set(key,value){localStorage.setItem(key,JSON.stringify(value))}
+  set(key,value){try{localStorage.setItem(key,JSON.stringify(value));return true}catch{return false}}
 };
 
 let favorites=store.get('vt-favorites',['en-US','fr-FR']);
@@ -227,19 +229,22 @@ function speakText(text,{replace=false}={}){
   if(replace){cancelVoice();primeNaturalVoice()}
   const generation=liveVoiceGeneration,lang=output.value;
   const natural=document.getElementById('voiceQuality').value!=='device';
-  queuedVoiceCount++;
+  const chunks=splitPhrases(clean);
+  queuedVoiceCount+=chunks.length;
   if(queuedVoiceCount>3)liveVoiceState.textContent='Catching up';
-  for(const chunk of splitPhrases(clean))liveVoiceQueue=liveVoiceQueue.catch(()=>{}).then(async()=>{
+  for(const chunk of chunks)liveVoiceQueue=liveVoiceQueue.catch(()=>{}).then(async()=>{
     if(generation!==liveVoiceGeneration)return;
     try{
       if(!natural){await deviceSpeak(chunk,lang);return}
-      voiceRequestController=new AbortController();
-      const timeout=setTimeout(()=>voiceRequestController?.abort(),12_000);
-      let response;
-      try{response=await fetch('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({text:chunk}),signal:voiceRequestController.signal})}finally{clearTimeout(timeout)}
-      if(!response.ok)throw new Error('Natural voice unavailable');
-      const blob=await response.blob();
+      const requestController=new AbortController();voiceRequestController=requestController;
+      const timeout=setTimeout(()=>requestController.abort(),12_000);
+      let blob;
+      try{
+        const response=await fetch('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({text:chunk}),signal:requestController.signal});
+        if(!response.ok)throw new Error('Natural voice unavailable');
+        blob=await response.blob();
+      }finally{clearTimeout(timeout);if(voiceRequestController===requestController)voiceRequestController=null}
       if(generation!==liveVoiceGeneration)return;
       const url=URL.createObjectURL(blob),player=naturalVoicePlayer||new Audio();player.src=url;activeVoiceAudio=player;
       try{
@@ -507,9 +512,11 @@ async function createMicrophonePcmStream(sessionId){
     throw cancelled;
   }
   mediaStream=capturedStream;
-  audioContext=new (window.AudioContext||window.webkitAudioContext)({sampleRate:24000,latencyHint:'interactive'});if(audioContext.state==='suspended')await audioContext.resume();
+  const captureContext=new (window.AudioContext||window.webkitAudioContext)({sampleRate:24000,latencyHint:'interactive'});
+  audioContext=captureContext;if(captureContext.state==='suspended')await captureContext.resume();
   if(!wantsListening||sessionId!==transcriptionSession){
-    await cleanupAudio();
+    capturedStream.getTracks().forEach(t=>t.stop());
+    try{await captureContext.close()}catch{}
     const cancelled=new Error('Microphone capture cancelled');
     cancelled.name='AbortError';
     throw cancelled;
@@ -521,21 +528,22 @@ async function createMicrophonePcmStream(sessionId){
     processorNode=new AudioWorkletNode(audioContext,'pcm-capture');
   }else processorNode=audioContext.createScriptProcessor(1024,1,1);
   muteNode=audioContext.createGain();muteNode.gain.value=0;
+  let streamController;
   const pcmStream=new ReadableStream({start(controller){
-    audioController=controller;
+    streamController=audioController=controller;
     const receive=samples=>{
-      if(!isListening||!audioController||sessionId!==transcriptionSession)return;
+      if(!isListening||audioController!==controller||sessionId!==transcriptionSession)return;
       lastAudioAt=Date.now();
       let energy=0;for(const sample of samples)energy+=sample*sample;
       if(Math.sqrt(energy/samples.length)>0.015)lastVoiceAt=lastAudioAt;
-      const pcm=floatTo16BitPCM(resampleTo24k(samples,audioContext.sampleRate));
+      const pcm=floatTo16BitPCM(resampleTo24k(samples,captureContext.sampleRate));
       // Bound pre-connection buffering to about two seconds.
       if(controller.desiredSize<-100)return;
       try{controller.enqueue(pcm)}catch{}
     };
     if(processorNode.port)processorNode.port.onmessage=e=>receive(e.data);
     else processorNode.onaudioprocess=e=>receive(e.inputBuffer.getChannelData(0));
-  },cancel(){audioController=null}});
+  },cancel(){if(audioController===streamController)audioController=null}});
   mediaStream.getAudioTracks().forEach(track=>track.addEventListener('ended',()=>{
     if(wantsListening&&sessionId===transcriptionSession)recoverSpeech();
   },{once:true}));
@@ -543,17 +551,20 @@ async function createMicrophonePcmStream(sessionId){
 }
 
 async function cleanupAudio(){
+  // Detach synchronously: an awaited close must never erase a newer session.
   isListening=false;
   clearInterval(healthTimer);healthTimer=null;
-  if(speechController){speechController.abort();speechController=null}
-  if(processorNode?.port){processorNode.port.onmessage=null;processorNode.port.close()}
-  if(processorNode){processorNode.onaudioprocess=null;try{processorNode.disconnect()}catch{}}
-  if(sourceNode){try{sourceNode.disconnect()}catch{}}
-  if(muteNode){try{muteNode.disconnect()}catch{}}
-  if(audioController){try{audioController.close()}catch{}audioController=null}
-  if(mediaStream){mediaStream.getTracks().forEach(t=>t.stop());mediaStream=null}
-  if(audioContext){try{await audioContext.close()}catch{}audioContext=null}
-  sourceNode=processorNode=muteNode=null;
+  const owned={speech:speechController,processor:processorNode,source:sourceNode,mute:muteNode,
+    controller:audioController,stream:mediaStream,context:audioContext};
+  speechController=processorNode=sourceNode=muteNode=audioController=mediaStream=audioContext=null;
+  owned.speech?.abort();
+  if(owned.processor?.port){owned.processor.port.onmessage=null;owned.processor.port.close()}
+  if(owned.processor){owned.processor.onaudioprocess=null;try{owned.processor.disconnect()}catch{}}
+  if(owned.source){try{owned.source.disconnect()}catch{}}
+  if(owned.mute){try{owned.mute.disconnect()}catch{}}
+  if(owned.controller){try{owned.controller.close()}catch{}}
+  if(owned.stream)owned.stream.getTracks().forEach(t=>t.stop());
+  if(owned.context){try{await owned.context.close()}catch{}}
 }
 
 function browserSpeechSupported(){
@@ -568,7 +579,9 @@ function startBrowserFallback(){
   if(audioSourceMode==='meeting'){setDiagnostic('fallback','error','Meeting audio requires realtime capture');return false;}
   if(!wantsListening||usingBrowserFallback||!browserSpeechSupported()){setDiagnostic('fallback','error','Browser speech fallback unavailable');return false;}
   const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-  browserRecognition=new Recognition();
+  const recognition=new Recognition();
+  browserRecognition=recognition;
+  const current=()=>usingBrowserFallback&&wantsListening&&browserRecognition===recognition;
   browserRecognition.continuous=true;
   browserRecognition.interimResults=true;
   browserRecognition.lang=input.value;
@@ -579,6 +592,7 @@ function startBrowserFallback(){
   statusEl.innerHTML='<span class="liveDot"></span>Listening — compatibility mode';
 
   browserRecognition.onresult=(event)=>{
+    if(!current())return;
     let interim='';
     let finalChunk='';
     for(let i=event.resultIndex;i<event.results.length;i++){
@@ -598,6 +612,7 @@ function startBrowserFallback(){
   };
 
   browserRecognition.onerror=(event)=>{
+    if(!current())return;
     console.warn('Browser speech fallback error:',event.error);
     if(event.error==='not-allowed'||event.error==='service-not-allowed'){
       wantsListening=false;
@@ -609,8 +624,8 @@ function startBrowserFallback(){
   };
 
   browserRecognition.onend=()=>{
-    if(usingBrowserFallback&&wantsListening){
-      try{browserRecognition.start()}catch{}
+    if(current()){
+      try{recognition.start()}catch{}
     }
   };
 
@@ -629,7 +644,7 @@ function startBrowserFallback(){
 function stopBrowserFallback(){
   usingBrowserFallback=false;
   if(browserRecognition){
-    try{browserRecognition.onend=null;browserRecognition.stop()}catch{}
+    try{browserRecognition.onend=null;browserRecognition.onresult=null;browserRecognition.onerror=null;browserRecognition.stop()}catch{}
     browserRecognition=null;
   }
 }
@@ -690,11 +705,13 @@ async function startListening(isReconnect=false){
 
     failureStage='token';
     setDiagnostic('token','pending');
-    speechController=new AbortController();
-    const tokenTimeout=setTimeout(()=>speechController?.abort(),20_000);
-    let tokenResponse;
-    try{tokenResponse=await fetch('/api/transcription-token',{method:'POST',signal:speechController.signal})}finally{clearTimeout(tokenTimeout)}
-    const tokenData=await tokenResponse.json().catch(()=>({}));
+    const sessionController=new AbortController();speechController=sessionController;
+    const tokenTimeout=setTimeout(()=>sessionController.abort(),20_000);
+    let tokenResponse,tokenData;
+    try{
+      tokenResponse=await fetch('/api/transcription-token',{method:'POST',signal:sessionController.signal});
+      tokenData=await tokenResponse.json().catch(()=>({}));
+    }finally{clearTimeout(tokenTimeout)}
     if(!wantsListening||sessionId!==transcriptionSession)return;
     if(!tokenResponse.ok||!tokenData.token){const detail=tokenData.detail?': '+tokenData.detail:'';throw new Error((tokenData.error||'Speech service unavailable')+detail+' (HTTP '+tokenResponse.status+')');}
     setDiagnostic('token','ok');
@@ -707,7 +724,7 @@ async function startListening(isReconnect=false){
       audio:microphoneStream,
       inputAudioFormat:{type:'audio/pcm',rate:24000},
       providerOptions:speechProviderOptions(input.value),
-      abortSignal:speechController.signal
+      abortSignal:sessionController.signal
     });
 
     let receivedRealtimeEvent=false;
@@ -744,13 +761,14 @@ async function startListening(isReconnect=false){
     if(wantsListening&&sessionId===transcriptionSession){
       if(!receivedRealtimeEvent)setDiagnostic('realtime','error','Realtime stream ended before any transcript event');
       await cleanupAudio();
-      scheduleReconnect();
+      if(sessionId===transcriptionSession)scheduleReconnect();
     }
   }catch(error){
     if(sessionId!==transcriptionSession)return;
-    console.error('Speech session error:',error);
+    console.error('Speech session error:',error?.name||'Error');
     setDiagnostic(failureStage,'error',error?.message||'Unknown speech error');
     await cleanupAudio();
+    if(sessionId!==transcriptionSession)return;
 
     const name=error?.name||'';
     const message=String(error?.message||'').toLowerCase();
@@ -789,14 +807,15 @@ async function startListening(isReconnect=false){
 async function stopListening(updateUi=true){
   wantsListening=false;
   clearTimeout(reconnectTimer);clearTimeout(sessionLimitTimer);
-  ++transcriptionSession;
+  const stoppedSession=++transcriptionSession;
   stopBrowserFallback();
+  if(interimTranscript){const tail=normalizeSpaces(interimTranscript);committedTranscript=normalizeSpaces(committedTranscript+' '+tail);interimTranscript='';setTranscript(currentTranscript());queueFinalTranslation(tail)}
   await cleanupAudio();
+  if(stoppedSession!==transcriptionSession)return;
   mic.classList.remove('listening');mic.setAttribute('aria-label','Start listening');mic.setAttribute('aria-pressed','false');mic.textContent='🎤';
   if(updateUi){
     speechState.textContent=committedTranscript?'Stopped':'';
     statusEl.textContent='Stopped — tap the microphone to continue';
-    if(interimTranscript){const tail=normalizeSpaces(interimTranscript);committedTranscript=normalizeSpaces(committedTranscript+' '+tail);interimTranscript='';setTranscript(currentTranscript());queueFinalTranslation(tail)}
   }
 }
 
