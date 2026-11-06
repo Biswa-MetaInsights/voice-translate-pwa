@@ -32,3 +32,7 @@ See [PERFORMANCE.md](PERFORMANCE.md) for public-endpoint measurements, the proxy
 - Stale browser speech callbacks are ignored and disconnected on stop. Unfinished phrases are committed before capture changes. Backlog coalescing preserves silent-history versus live-voice settings, and the voice counter counts all chunks.
 - Blocked/quota-limited preference storage no longer interrupts language changes. Upstream transcription-token error messages are excluded from logs and client responses; only a safe HTTP status is retained.
 - The existing live language picker was exercised in a cloud browser. No app-origin console errors were observed; browser-extension metadata errors were unrelated. These checks do not establish real iPhone microphone behavior, human-accent accuracy or removal of the previously observed first-connection transport delay.
+
+## Live verification — 6 November 2026 (new fixes awaiting approval)
+
+See [LIVE_VALIDATION.md](LIVE_VALIDATION.md) for fresh public-deployment checks, seven successful streaming benchmarks, seven automatic-detection semantic spot checks, production token/audio and synthetic realtime recognition results, and preview's continuing upstream 403. Two further frontend defects were reproduced against current main and found in the live bundle: combined final/interim browser results drop interim words, and stale realtime frames alter newer-session diagnostics/retry counts. Their local fixes pass 40 tests and the production build. No push, merge, deployment or configuration change was performed in this verification.
