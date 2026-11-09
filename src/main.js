@@ -603,12 +603,12 @@ function startBrowserFallback(){
     if(finalChunk){
       const finalPhrase=normalizeSpaces(finalChunk);
       committedTranscript=normalizeSpaces(committedTranscript+' '+finalPhrase);
-      interimTranscript='';
-      const visible=currentTranscript();setTranscript(visible);queueFinalTranslation(finalPhrase);
-    }else{
-      interimTranscript=interim;
-      const visible=currentTranscript();setTranscript(visible);scheduleTranslation(interimTranscript);
+      queueFinalTranslation(finalPhrase);
     }
+    // A single result event may finalize one phrase and start the next.
+    interimTranscript=interim;
+    setTranscript(currentTranscript());
+    if(interimTranscript)scheduleTranslation(interimTranscript);
   };
 
   browserRecognition.onerror=(event)=>{
@@ -733,12 +733,12 @@ async function startListening(isReconnect=false){
     noteUse(input.value);
 
     for await(const part of result.fullStream){
+      if(!wantsListening||sessionId!==transcriptionSession)break;
       if(!receivedRealtimeEvent&&(part.type==='transcript-delta'||part.type==='transcript-final')){
         receivedRealtimeEvent=true;
         reconnectAttempts=0;
         setDiagnostic('realtime','ok');
       }
-      if(!wantsListening||sessionId!==transcriptionSession)break;
       if(part.type==='transcript-delta'||part.type==='transcript-partial'||part.type==='transcript-final')lastTranscriptAt=Date.now();
       if(part.type==='transcript-delta'){
         interimTranscript+=part.delta||'';
