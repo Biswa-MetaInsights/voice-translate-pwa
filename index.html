@@ -59,6 +59,21 @@
     .btn{min-height:52px;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:16px;font-weight:850}
     .btn.primary{background:var(--accent);color:var(--accentText);border-color:transparent}
     .hint{text-align:center;color:var(--muted);font-size:.76rem;margin-top:17px}
+    .infoCard{margin-top:14px;border:1px solid var(--line);border-radius:20px;background:var(--surface);padding:16px}
+    .infoCard h2{font-size:1rem;margin:0 0 6px;letter-spacing:-.01em}
+    .infoCard p{color:var(--muted);font-size:.82rem;line-height:1.5;margin:5px 0 0}
+    .mobileNotice{display:flex;align-items:flex-start;gap:11px;background:var(--surface2)}
+    .noticeIcon{font-size:1.35rem;line-height:1.2}
+    .installSteps{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+    .installSteps>div{border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface2)}
+    .installSteps strong{font-size:.8rem}.installSteps p{font-size:.75rem;margin-top:5px}
+    .installMore{display:inline-block;margin-top:12px;color:var(--accent);font-size:.8rem;font-weight:850;text-decoration:none}
+    .feedbackForm{display:grid;gap:10px;margin-top:12px}
+    .feedbackForm label{display:grid;gap:5px;font-size:.78rem;font-weight:800}
+    .feedbackForm input,.feedbackForm select,.feedbackForm textarea{width:100%;min-height:46px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--text);padding:10px 12px;font:inherit;font-size:.86rem}
+    .feedbackForm textarea{min-height:100px;resize:vertical}
+    .feedbackForm .btn{width:100%;cursor:pointer}
+    .feedbackStatus{min-height:1.2em;color:var(--muted);font-size:.76rem;line-height:1.4}
     .settings{margin-top:14px;border:1px solid var(--line);border-radius:16px;padding:12px;background:var(--surface)}
     .settings summary{cursor:pointer;font-size:.84rem;font-weight:800;color:var(--accent);min-height:28px}
     .settings label{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:.8rem;margin-top:12px}
@@ -77,7 +92,7 @@
     .langItemMain{border:0;background:transparent;color:var(--text);text-align:left;font-weight:820;padding:10px 0}
     .starBtn{width:44px;height:44px;border:0;border-radius:13px;background:var(--surface2);color:var(--muted);font-size:20px}.starBtn.active{color:#e0a400}
     .themeGrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.themeChoice{min-height:76px;border:1px solid var(--line);border-radius:18px;background:var(--surface);color:var(--text);padding:12px;text-align:left;font-weight:900}.themeChoice small{display:block;color:var(--muted);font-weight:600;margin-top:4px}.themeChoice.active{outline:3px solid var(--accent)}
-    @media(max-width:520px){.app{padding-left:12px;padding-right:12px}.card{padding:14px}.languageRow{grid-template-columns:1fr 52px 1fr;gap:7px}.langBtn{min-height:78px;padding:10px}.swap{width:52px;height:58px}.mic{width:140px;height:140px}.actions{grid-template-columns:1fr 1fr}.btn:last-child{grid-column:1/-1}.themeGrid{grid-template-columns:1fr}}
+    @media(max-width:520px){.app{padding-left:12px;padding-right:12px}.card{padding:14px}.languageRow{grid-template-columns:1fr 52px 1fr;gap:7px}.langBtn{min-height:78px;padding:10px}.swap{width:52px;height:58px}.mic{width:140px;height:140px}.actions{grid-template-columns:1fr 1fr}.btn:last-child{grid-column:1/-1}.themeGrid{grid-template-columns:1fr}.installSteps{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -116,12 +131,17 @@
       <div class="panel"><div class="sectionTitle"><span>Live transcription</span><span class="smallStatus" id="speechState"></span></div><div class="textBox placeholder" id="transcript">Your speech will appear here.</div></div>
       <div class="panel"><div class="sectionTitle"><span>Live translation</span><span class="smallStatus" id="translationState"></span></div><div class="textBox placeholder" id="translation">Your translation will appear here.</div><div class="liveVoiceRow"><div class="liveVoiceCopy"><span style="font-size:22px">🔊</span><div><strong>Live translated voice <span class="liveVoiceState" id="liveVoiceState">Off</span></strong><small>Automatically speak each completed translated phrase</small></div></div><label class="switch" aria-label="Live translated voice"><input type="checkbox" id="liveVoiceToggle"><span class="slider"></span></label></div><div class="actions"><button class="btn" id="copy">Copy</button><button class="btn primary" id="speak">🔊 Speak</button><button class="btn" id="clear">Clear</button></div></div>
     </section>
+    <section class="infoCard mobileNotice" aria-labelledby="mobileAppTitle"><span class="noticeIcon" aria-hidden="true">📱</span><div><h2 id="mobileAppTitle">A dedicated mobile app is under construction</h2><p>While we build it, you can add VoiceTranslator.eu to your phone’s home screen and use it like an app. No App Store or Play Store download is needed.</p></div></section>
+    <section class="infoCard" aria-labelledby="installTitle"><h2 id="installTitle">Add VoiceTranslator to your phone</h2><div class="installSteps"><div><strong>iPhone or iPad</strong><p>Open this page in <b>Safari</b>. Tap <b>Share</b> → <b>Add to Home Screen</b> → <b>Add</b>.</p></div><div><strong>Android</strong><p>Open this page in <b>Chrome</b>. Tap <b>⋮</b> → <b>Install app</b> or <b>Add to Home screen</b>.</p></div></div><a class="installMore" href="/install.html">See the full installation guide →</a></section>
+    <section class="infoCard" aria-labelledby="feedbackTitle"><h2 id="feedbackTitle">Help us improve VoiceTranslator</h2><p>Tell us what worked, what went wrong, or what you’d like us to build next. You can share your name and email so we can follow up.</p><form class="feedbackForm" id="feedbackForm"><label for="feedbackCategory">What is your feedback about?</label><select id="feedbackCategory" name="category" required><option value="">Choose a topic</option><option>Translation quality</option><option>Speech recognition or microphone</option><option>Speed or reliability</option><option>Feature idea</option><option>Something else</option></select><label for="feedbackMessage">Your feedback</label><textarea id="feedbackMessage" name="message" required maxlength="3000" placeholder="What happened, or what would make the app more useful?"></textarea><label for="feedbackName">Your name (optional)</label><input id="feedbackName" name="name" autocomplete="name" maxlength="100" placeholder="Name"><label for="feedbackEmail">Email (optional, if you’d like a reply)</label><input id="feedbackEmail" name="email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com"><input name="website" type="text" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px"/><button class="btn primary" type="submit">Send feedback</button><div class="feedbackStatus" id="feedbackStatus" role="status" aria-live="polite">Submitting saves your topic and message to the VoiceTranslator feedback tracker. If the database is temporarily unavailable, the form prepares an email instead. Please don’t include private conversation content.</div></form></section>
     <div class="hint">Live speech translation • no sign-in • <a href="/privacy.html" style="color:inherit">Privacy</a></div><footer class="powered">Powered by <a href="https://metainsights.eu" target="_blank" rel="noopener noreferrer">Metainsights BV</a></footer>
   </main>
 
   <div class="sheetBackdrop" id="languageSheet" aria-hidden="true"><div class="sheet"><div class="sheetHandle"></div><div class="sheetHead"><h2 id="sheetTitle">Choose language</h2><button class="closeBtn" data-close="languageSheet">×</button></div><input class="search" id="languageSearch" type="search" placeholder="Search languages…" autocomplete="off"/><div id="languageResults"></div></div></div>
   <div class="sheetBackdrop" id="themeSheet" aria-hidden="true"><div class="sheet"><div class="sheetHandle"></div><div class="sheetHead"><h2>Choose your look</h2><button class="closeBtn" data-close="themeSheet">×</button></div><div class="themeGrid" id="themeGrid"></div></div></div>
 
+  <script type="module" src="/src/analytics.js"></script>
   <script type="module" src="/src/main.js"></script>
+  <script type="module" src="/src/feedback.js"></script>
 </body>
 </html>
