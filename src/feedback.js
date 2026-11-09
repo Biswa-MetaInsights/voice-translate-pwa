@@ -61,13 +61,27 @@ form?.addEventListener('submit', async (event) => {
         'Content-Type': 'application/json',
         Prefer: 'return=minimal',
       },
-      body: JSON.stringify({ category, message, display_name: name || null, contact_email: email || null }),
+      body: JSON.stringify({ source_app: 'VoiceTranslator.eu', category, message, display_name: name || null, contact_email: email || null }),
     });
 
     if (!response.ok) throw new Error(`Feedback could not be saved (${response.status}).`);
 
+    let emailSent = false;
+    try {
+      const notification = await fetch('/api/feedback-notification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_app: 'VoiceTranslator.eu', ...feedback }),
+      });
+      emailSent = notification.ok;
+    } catch {
+      // The database remains the source of truth if the mail provider is unavailable.
+    }
+
     form.reset();
-    if (status) status.textContent = 'Thank you. Your feedback has been saved for the VoiceTranslator team to review.';
+    if (status) status.textContent = emailSent
+      ? 'Thank you. Your feedback was saved and emailed to the VoiceTranslator team.'
+      : 'Thank you. Your feedback was saved. Email notification is unavailable right now, but the team can still review it in the tracker.';
   } catch {
     if (status) status.textContent = 'We couldn’t save your feedback just now. Your email app will open with it ready to send instead.';
     fallbackEmail(feedback);
