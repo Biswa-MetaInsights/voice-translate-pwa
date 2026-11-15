@@ -1,3 +1,5 @@
+import {createLiveText} from '../src/live-text.js';
+import {createDocument} from './helpers/dom.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -7,16 +9,11 @@ import {shouldRecover,speechProviderOptions} from '../src/audio-health.js';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const frontend=readFileSync(new URL('../src/main.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
 function app(extra={}){
-  const elements=new Map();
-  const element=()=>({value:'',textContent:'',children:[],dataset:{},classList:{toggle(){},add(){},remove(){},contains(){return false}},
-    append(...items){this.children.push(...items)},appendChild(item){this.children.push(item)},
-    setAttribute(){},removeAttribute(){},addEventListener(){},set innerHTML(value){this.children=[]},get innerHTML(){return ''}});
-  const document={getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id)},
-    createElement:element,querySelectorAll:()=>[],documentElement:{dataset:{}},addEventListener(){}};
+  const document=createDocument();
   document.getElementById('inputLang').value='fr-FR';document.getElementById('outputLang').value='en-US';
   const context=vm.createContext({document,navigator:{onLine:true,mediaDevices:{}},window:{addEventListener(){}},
     localStorage:{getItem(){return null},setItem(){}},setTimeout,clearTimeout,setInterval,clearInterval,console,AbortController,
-    OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello'}),splitPhrases,shouldRecover,speechProviderOptions,performance,...extra});
+    createLiveText,OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello'}),splitPhrases,shouldRecover,speechProviderOptions,performance,...extra});
   vm.runInContext(frontend,context);return {context,document,run:code=>vm.runInContext(code,context)};
 }
 
@@ -134,4 +131,46 @@ test('old watchdog recovery cannot schedule reconnects for a newer session',asyn
   context.oldContext={close:()=>new Promise(resolve=>{closeOld=resolve;})};
   run('audioContext=oldContext;wantsListening=true;var reconnects=0;scheduleReconnect=()=>reconnects++;var recovery=recoverSpeech();++transcriptionSession');
   closeOld();await run('recovery');assert.equal(run('reconnects'),0);
+});
+
+test('live translations retain completed DOM nodes while phrases stream, queue and finish out of order',async()=>{
+  const requests=new Map();
+  const {run,document}=app({requestTranslation:(job,{onProgress})=>new Promise(resolve=>requests.set(job.text,{onProgress,resolve}))});
+  const box=document.getElementById('translation');
+  run("queueFinalTranslation('one')");await tick();
+  requests.get('one').onProgress('First sentence.');
+  assert.equal(box.textContent,'First sentence.');
+  run("queueFinalTranslation('two')");await tick();
+  assert.equal(box.textContent,'First sentence.'); // Enqueue must not blank the active stream.
+  requests.get('two').onProgress('Second sentence.');
+  assert.equal(box.textContent,'First sentence.'); // Later speech cannot overtake the first.
+  requests.get('one').resolve({translation:'First sentence.'});await tick();
+  const first=box.children[0].children[0];
+  requests.get('two').onProgress('Second');
+  requests.get('two').onProgress(''); // Provider retry must not flash a blank draft.
+  assert.equal(box.textContent,'First sentence. Second');
+  requests.get('two').resolve({translation:'Second sentence.'});await tick();
+  assert.equal(box.textContent,'First sentence. Second sentence.');
+  assert.equal(box.children[0].children[0],first);
+  assert.equal(first.textContent,'First sentence.');
+  run("committedTranscript='one two';interimTranscript='three';setTranscript()");
+  const source=document.getElementById('transcript'),oldSource=source.children[0].children[0];
+  run("interimTranscript='three four';setTranscript()");
+  assert.equal(source.textContent,'one two three four');assert.equal(source.children[0].children[0],oldSource);
+  document.getElementById('clear').onclick();
+  assert.equal(box.textContent,'Your translation will appear here.');
+  assert.equal(source.textContent,'Your speech will appear here.');
+});
+
+test('browser speech keeps the next partial phrase when a result also finalizes earlier speech',async()=>{
+  let recognition;
+  class Recognition{constructor(){recognition=this}start(){}stop(){}}
+  const {run,document}=app({window:{addEventListener(){},SpeechRecognition:Recognition}});
+  run('wantsListening=true;startBrowserFallback()');
+  recognition.onresult({resultIndex:0,results:[
+    Object.assign([{transcript:'First sentence.'}],{isFinal:true}),
+    Object.assign([{transcript:'Next sentence'}],{isFinal:false})
+  ]});
+  assert.equal(document.getElementById('transcript').textContent,'First sentence. Next sentence');
+  await tick();run('stopBrowserFallback()');
 });

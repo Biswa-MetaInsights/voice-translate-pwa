@@ -1,6 +1,7 @@
 import { experimental_streamTranscribe as streamTranscribe } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
 import { OrderedTranslationQueue, requestTranslation, splitPhrases } from './translation-client.js';
+import { createLiveText } from './live-text.js';
 import { shouldRecover, speechProviderOptions } from './audio-health.js';
 
 const LANGUAGES = [
@@ -88,6 +89,8 @@ const speechState=document.getElementById('speechState');
 const translationState=document.getElementById('translationState');
 const transcriptEl=document.getElementById('transcript');
 const translationEl=document.getElementById('translation');
+const renderTranscript=createLiveText(transcriptEl,'Your speech will appear here.');
+const renderTranslation=createLiveText(translationEl,'Your translation will appear here.');
 const input=document.getElementById('inputLang');
 const output=document.getElementById('outputLang');
 const copyBtn=document.getElementById('copy');
@@ -122,7 +125,7 @@ async function recoverSpeech(){
   ++transcriptionSession;
   // Keep the most recent partial phrase rather than losing it on recovery.
   const tail=normalizeSpaces(interimTranscript);
-  if(tail){committedTranscript=normalizeSpaces(committedTranscript+' '+tail);interimTranscript='';queueFinalTranslation(tail);setTranscript(currentTranscript())}
+  if(tail){committedTranscript=normalizeSpaces(committedTranscript+' '+tail);interimTranscript='';queueFinalTranslation(tail);setTranscript()}
   setDiagnostic('realtime','error','Speech stalled; restoring the connection');
   const recoverySession=transcriptionSession;
   await cleanupAudio();speechRecoveryRunning=false;
@@ -184,8 +187,8 @@ function showDetectedLanguage(code){
   if(label)label.textContent=input.value!=='auto'?'':detectedInputLanguage==='mixed'?'Detected: mixed languages':detectedInputLanguage?'Detected: '+language(detectedInputLanguage).name:'Language will be detected as you speak';
 }
 function normalizeSpaces(v){return v.replace(/\s+/g,' ').trim()}
-function setTranscript(text){transcriptEl.textContent=text||'Your speech will appear here.';transcriptEl.className=text?'textBox':'textBox placeholder';transcriptEl.dir=/^(ar|he|fa|ur)(-|$)/.test(input.value)?'rtl':'auto'}
-function setTranslation(text){translationEl.textContent=text||'Your translation will appear here.';translationEl.className=text?'textBox':'textBox placeholder';translationEl.dir=/^(ar|he|fa|ur)(-|$)/.test(output.value)?'rtl':'auto'}
+function setTranscript(){renderTranscript(committedTranscript,interimTranscript,/^(ar|he|fa|ur)(-|$)/.test(input.value)?'rtl':'auto')}
+function setTranslation(text='',draft=''){renderTranslation(text,draft,/^(ar|he|fa|ur)(-|$)/.test(output.value)?'rtl':'auto')}
 function currentTranscript(){return normalizeSpaces(committedTranscript+' '+interimTranscript)}
 
 function chooseSpeechVoice(lang){
@@ -418,7 +421,7 @@ const finalTranslations=new OrderedTranslationQueue({
     const result=await requestTranslation(job,{signal,onProgress});
     return {...result,endToEndMs:Math.round(performance.now()-job.capturedAt),requestMs:Math.round(performance.now()-started)};
   },
-  onProgress:text=>{translatedInterim=normalizeSpaces(text);showTranslatedText()},
+  onProgress:text=>{if(text){translatedInterim=normalizeSpaces(text);showTranslatedText()}},
   onPending:count=>{
     pendingTranslations=count;
     const el=document.getElementById('queueState');
@@ -440,7 +443,7 @@ const finalTranslations=new OrderedTranslationQueue({
     showTranslatedText();
   }
 });
-function showTranslatedText(){setTranslation(normalizeSpaces(translatedCommitted+' '+translatedInterim))}
+function showTranslatedText(){setTranslation(translatedCommitted,translatedInterim)}
 function resetTranslationPipeline(retranslateHistory=false){
   ++translationEpoch;++translateSequence;cancelVoice();
   clearTimeout(translateTimer);
@@ -470,7 +473,7 @@ async function translateText(text){
   try{
     const data=await requestTranslation({text:text.slice(-2400),sourceLanguage:input.value,targetLanguage:output.value,quality:'fast',context:recentSourcePhrases},
       {signal:controller.signal,onProgress:translation=>{
-        if(epoch===translationEpoch&&seq===translateSequence&&!pendingTranslations){translatedInterim=translation;showTranslatedText()}
+        if(translation&&epoch===translationEpoch&&seq===translateSequence&&!pendingTranslations){translatedInterim=translation;showTranslatedText()}
       }});
     if(epoch!==translationEpoch||seq!==translateSequence||pendingTranslations)return;
     translatedInterim=normalizeSpaces(data.translation||'');showTranslatedText();translationState.textContent='Preview';
@@ -480,7 +483,8 @@ function queueFinalTranslation(phrase,{speak=true}={}){
   const text=normalizeSpaces(phrase||'');if(!text)return;
   ++translateSequence;clearTimeout(translateTimer);
   if(translateController)translateController.abort();translateController=null;
-  lastInterimText='';translatedInterim='';showTranslatedText();
+  // Keep the current preview/stream visible while another phrase is queued.
+  lastInterimText='';
   for(const chunk of splitPhrases(text)){
     finalTranslations.push({text:chunk,sourceLanguage:input.value,targetLanguage:output.value,
       quality:document.getElementById('translationQuality').value||'accurate',context:[...recentSourcePhrases],
@@ -603,11 +607,11 @@ function startBrowserFallback(){
     if(finalChunk){
       const finalPhrase=normalizeSpaces(finalChunk);
       committedTranscript=normalizeSpaces(committedTranscript+' '+finalPhrase);
-      interimTranscript='';
-      const visible=currentTranscript();setTranscript(visible);queueFinalTranslation(finalPhrase);
+      interimTranscript=interim;
+      setTranscript();queueFinalTranslation(finalPhrase);
     }else{
       interimTranscript=interim;
-      const visible=currentTranscript();setTranscript(visible);scheduleTranslation(interimTranscript);
+      setTranscript();scheduleTranslation(interimTranscript);
     }
   };
 
@@ -742,18 +746,18 @@ async function startListening(isReconnect=false){
       if(part.type==='transcript-delta'||part.type==='transcript-partial'||part.type==='transcript-final')lastTranscriptAt=Date.now();
       if(part.type==='transcript-delta'){
         interimTranscript+=part.delta||'';
-        const visible=currentTranscript();setTranscript(visible);
+        setTranscript();
         speechState.textContent='Hearing you…';scheduleTranslation(interimTranscript);
       }
       if(part.type==='transcript-final'){
         const finalText=normalizeSpaces(part.text||interimTranscript);
         if(finalText)committedTranscript=normalizeSpaces(committedTranscript+' '+finalText);
         interimTranscript='';
-        const visible=currentTranscript();setTranscript(visible);
+        setTranscript();
         speechState.textContent='Captured';queueFinalTranslation(finalText);
       }
       if(part.type==='transcript-partial'){
-        interimTranscript=part.text||'';setTranscript(currentTranscript());scheduleTranslation(interimTranscript);
+        interimTranscript=part.text||'';setTranscript();scheduleTranslation(interimTranscript);
       }
       if(part.type==='error')throw new Error(part.error?.message||part.message||'Speech connection interrupted');
     }
@@ -809,7 +813,7 @@ async function stopListening(updateUi=true){
   clearTimeout(reconnectTimer);clearTimeout(sessionLimitTimer);
   const stoppedSession=++transcriptionSession;
   stopBrowserFallback();
-  if(interimTranscript){const tail=normalizeSpaces(interimTranscript);committedTranscript=normalizeSpaces(committedTranscript+' '+tail);interimTranscript='';setTranscript(currentTranscript());queueFinalTranslation(tail)}
+  if(interimTranscript){const tail=normalizeSpaces(interimTranscript);committedTranscript=normalizeSpaces(committedTranscript+' '+tail);interimTranscript='';setTranscript();queueFinalTranslation(tail)}
   await cleanupAudio();
   if(stoppedSession!==transcriptionSession)return;
   mic.classList.remove('listening');mic.setAttribute('aria-label','Start listening');mic.setAttribute('aria-pressed','false');mic.textContent='🎤';
@@ -829,7 +833,7 @@ mic.onclick=async()=>{
   await startListening(false);
 };
 document.getElementById('swap').onclick=async()=>{const resumeListening=wantsListening;if(resumeListening)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);resetTranslationPipeline(true);if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}};
-document.getElementById('clear').onclick=()=>{committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';cancelVoice();resetTranslationPipeline();clearTimeout(liveVoicePauseTimer);if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript('');setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
+document.getElementById('clear').onclick=()=>{committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';cancelVoice();resetTranslationPipeline();clearTimeout(liveVoicePauseTimer);if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript();setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
 copyBtn.onclick=async()=>{if(translationEl.classList.contains('placeholder'))return;try{await navigator.clipboard.writeText(translationEl.textContent);statusEl.textContent='Translation copied'}catch{statusEl.textContent='Copy failed'}};
 speakBtn.onclick=()=>{if(translationEl.classList.contains('placeholder'))return;speakText(translationEl.textContent,{replace:true})};
 if(liveVoiceToggle){
