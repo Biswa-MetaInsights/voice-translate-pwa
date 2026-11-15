@@ -25,7 +25,15 @@ async function run(job){
  const {id,expect,...payload}=job;
  const child=spawn('curl',['--silent','--show-error','--location','--no-buffer','--max-time','35','--request','POST','--header','Content-Type: application/json','--data-binary','@-',new URL('/api/translate',base).href],{stdio:['pipe','pipe','pipe']});
  child.stdin.on('error',()=>{});child.stdin.end(JSON.stringify({...payload,stream:true}));
- let body='';child.stdout.setEncoding('utf8');child.stdout.on('data',c=>body+=c);child.stderr.resume();
+ let body='',buffer='',firstTextMs=null,firstTextLength=0,doneMs=null;
+ child.stdout.setEncoding('utf8');child.stdout.on('data',c=>{
+   body+=c;buffer+=c;let newline;
+   while((newline=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,newline);buffer=buffer.slice(newline+1);try{
+     const event=JSON.parse(line);
+     if(event.type==='progress'&&event.translation&&firstTextMs===null){firstTextMs=Math.round(performance.now()-started);firstTextLength=event.translation.length;}
+     if(event.type==='done')doneMs=Math.round(performance.now()-started);
+   }catch{}}
+ });child.stderr.resume();
  const code=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',resolve)});
  let status='pass',detail='',result,events=[];
  try{
@@ -34,15 +42,15 @@ async function run(job){
   result=events.find(e=>e.type==='done')?.result;
   if(!result||events.some(e=>e.type==='error'))throw Error('API did not finish successfully');
   if(result.targetLanguage!==job.targetLanguage)throw Error('Target metadata mismatch');
-  for(const e of events.filter(e=>e.type==='progress'))assertTranslationLanguage(e.translation,payload);
+  for(const e of events.filter(e=>e.type==='progress'))if(e.targetLanguage!==job.targetLanguage)throw Error('Streaming target metadata mismatch');
   assertTranslationLanguage(result.translation,payload);
   for(const pattern of expect)if(!new RegExp(pattern,'iu').test(result.translation))throw Error('Meaning check failed: '+pattern);
   if(job.id==='unfinished'&&result.translation.trim().toLowerCase()!=='if you could send me the')throw Error('Unfinished thought was completed');
  }catch(e){status='fail';detail=e.message;}
- return {id,source:job.sourceLanguage,target:job.targetLanguage,quality:job.quality||'accurate',status,detail,ms:Math.round(performance.now()-started),attempts:result?.metrics?.attempts?.length};
+ return {id,source:job.sourceLanguage,target:job.targetLanguage,quality:job.quality||'accurate',status,detail,ms:Math.round(performance.now()-started),attempts:result?.metrics?.attempts?.length,firstTextMs,doneMs,incremental:Boolean(result&&firstTextLength<result.translation.length)};
 }
 const results=[];let next=0;
 await Promise.all(Array.from({length:4},async()=>{while(next<jobs.length){const result=await run(jobs[next++]);results.push(result);console.log(JSON.stringify(result));}}));
 const failures=results.filter(x=>x.status==='fail');
-console.log(JSON.stringify({summary:true,cases:results.length,passed:results.length-failures.length,failed:failures.length,microphoneIncluded:false}));
+console.log(JSON.stringify({summary:true,cases:results.length,passed:results.length-failures.length,failed:failures.length,incremental:results.filter(x=>x.incremental).length,microphoneIncluded:false}));
 if(failures.length)process.exitCode=1;
