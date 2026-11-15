@@ -147,8 +147,8 @@ test('live translations retain completed DOM nodes while phrases stream, queue a
   requests.get('one').resolve({translation:'First sentence.'});await tick();
   const first=box.children[0].children[0];
   requests.get('two').onProgress('Second');
-  requests.get('two').onProgress(''); // Provider retry must not flash a blank draft.
-  assert.equal(box.textContent,'First sentence. Second');
+  requests.get('two').onProgress(''); // Discard a rejected draft without changing completed sentences.
+  assert.equal(box.textContent,'First sentence.');
   requests.get('two').resolve({translation:'Second sentence.'});await tick();
   assert.equal(box.textContent,'First sentence. Second sentence.');
   assert.equal(box.children[0].children[0],first);
@@ -198,4 +198,33 @@ test('a late speculative preview cannot overwrite the completed English phrase',
   requests[1].resolve({translation:'Hello'});await tick();
   requests[0].onProgress('Bonjour');requests[0].resolve({translation:'Bonjour'});await run('preview');
   assert.equal(document.getElementById('translation').textContent,'Hello');
+});
+
+test('MP3 download snapshots completed turns and live translation continues while it is prepared',async()=>{
+  let finishExport,snapshot,saved=0;
+  const {run,document}=app({
+    createConversationMp3:(turns)=>{snapshot=turns;return new Promise(resolve=>finishExport=resolve)},
+    URL:{createObjectURL:()=> 'blob:conversation',revokeObjectURL(){}},
+    requestTranslation:async job=>({translation:job.text==='Bonjour'?'Hello':'Thank you'})
+  });
+  const download=document.getElementById('downloadMp3'),link=document.getElementById('mp3Save');link.click=()=>saved++;
+  run("queueFinalTranslation('Bonjour')");await tick();assert.equal(download.disabled,false);
+  const exporting=download.onclick();
+  run("queueFinalTranslation('Merci')");await tick();
+  assert.equal(document.getElementById('translation').textContent,'Hello Thank you');
+  assert.equal(snapshot.length,1);assert.equal(snapshot[0].source,'Bonjour');assert.equal(snapshot[0].translation,'Hello');
+  finishExport(new Blob(['audio']));await exporting;
+  assert.equal(saved,1);assert.equal(link.href,'blob:conversation');assert.match(link.download,/\.mp3$/);
+  assert.equal(download.disabled,false);
+});
+
+test('Clear cancels an export and removes its conversation snapshot from the screen',async()=>{
+  let signal;
+  const {run,document}=app({createConversationMp3:(_,options)=>{signal=options.signal;return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true}))}});
+  run("queueFinalTranslation('Bonjour')");await tick();
+  const exporting=document.getElementById('downloadMp3').onclick();
+  document.getElementById('clear').onclick();await exporting;
+  assert.equal(signal.aborted,true);assert.equal(document.getElementById('downloadMp3').disabled,true);
+  assert.equal(document.getElementById('mp3Save').hidden,true);
+  assert.equal(document.getElementById('translation').textContent,'Your translation will appear here.');
 });

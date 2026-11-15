@@ -1,6 +1,7 @@
 import { experimental_streamTranscribe as streamTranscribe } from 'ai';
 import { createGateway } from '@ai-sdk/gateway';
 import { OrderedTranslationQueue, requestTranslation, splitPhrases } from './translation-client.js';
+import { createConversationMp3 } from './conversation-export.js';
 import { createLiveText } from './live-text.js';
 import { shouldRecover, speechProviderOptions } from './audio-health.js';
 
@@ -113,6 +114,8 @@ let liveVoiceEnabled=false;
 let liveVoiceGeneration=0;
 let liveVoiceQueue=Promise.resolve();
 let translatedCommitted='',translatedInterim='',lastInterimText='',finalPhraseQueue=Promise.resolve(),translationEpoch=0,lastPreviewAt=0;
+let conversationTurns=[],mp3Controller=null,mp3Url=null;
+const downloadMp3Btn=document.getElementById('downloadMp3');
 let liveVoicePauseTimer=null;
 let lastLiveVoiceSource='';
 let audioSourceMode='mic';
@@ -421,7 +424,7 @@ const finalTranslations=new OrderedTranslationQueue({
     const result=await requestTranslation(job,{signal,onProgress});
     return {...result,endToEndMs:Math.round(performance.now()-job.capturedAt),requestMs:Math.round(performance.now()-started)};
   },
-  onProgress:text=>{if(text){translatedInterim=normalizeSpaces(text);showTranslatedText()}},
+  onProgress:text=>{translatedInterim=normalizeSpaces(text);showTranslatedText()},
   onPending:count=>{
     pendingTranslations=count;
     const el=document.getElementById('queueState');
@@ -429,6 +432,8 @@ const finalTranslations=new OrderedTranslationQueue({
   },
   onCommit:({job,result,error})=>{
     translatedInterim='';
+    conversationTurns.push({source:job.text,translation:error?'':result.translation});
+    if(downloadMp3Btn)downloadMp3Btn.disabled=Boolean(mp3Controller);
     if(error){
       translationFailures=true;
       translatedCommitted=normalizeSpaces(translatedCommitted+' ⟦Translation unavailable⟧');
@@ -450,6 +455,7 @@ function resetTranslationPipeline(retranslateHistory=false){
   if(translateController)translateController.abort();
   translateController=null;finalTranslations.clear();
   recentSourcePhrases=[];translationFailures=false;
+  conversationTurns=[];if(downloadMp3Btn)downloadMp3Btn.disabled=true;
   document.getElementById('retryTranslation').hidden=true;
   translatedCommitted='';translatedInterim='';lastInterimText='';lastRequestedText='';lastPreviewAt=0;
   showDetectedLanguage(null);showTranslatedText();translationState.textContent='';
@@ -473,7 +479,7 @@ async function translateText(text){
   try{
     const data=await requestTranslation({text:text.slice(-2400),sourceLanguage:input.value,targetLanguage:output.value,quality:'fast',context:recentSourcePhrases},
       {signal:controller.signal,onProgress:translation=>{
-        if(translation&&epoch===translationEpoch&&seq===translateSequence&&!pendingTranslations){translatedInterim=translation;showTranslatedText()}
+        if(epoch===translationEpoch&&seq===translateSequence&&!pendingTranslations){translatedInterim=translation;showTranslatedText()}
       }});
     if(epoch!==translationEpoch||seq!==translateSequence||pendingTranslations)return;
     translatedInterim=normalizeSpaces(data.translation||'');showTranslatedText();translationState.textContent='Preview';
@@ -493,6 +499,33 @@ function queueFinalTranslation(phrase,{speak=true}={}){
   }
 }
 document.getElementById('retryTranslation').onclick=()=>resetTranslationPipeline(true);
+
+function clearMp3Download(){
+  if(mp3Controller)mp3Controller.abort();
+  if(mp3Url){URL.revokeObjectURL(mp3Url);mp3Url=null;}
+  const link=document.getElementById('mp3Save');if(link){link.hidden=true;link.removeAttribute('href')}
+}
+if(downloadMp3Btn)downloadMp3Btn.onclick=async()=>{
+  if(mp3Controller)return;
+  clearMp3Download();
+  const controller=new AbortController();mp3Controller=controller;
+  const status=document.getElementById('mp3Status'),cancel=document.getElementById('cancelMp3');
+  downloadMp3Btn.disabled=true;cancel.hidden=false;
+  const snapshot=conversationTurns.map(turn=>({...turn}));
+  try{
+    const blob=await createConversationMp3(snapshot,{mode:document.getElementById('mp3Content').value||'both',signal:controller.signal,
+      onProgress:({completed,total})=>{status.textContent='Preparing MP3 · '+Math.round(completed/total*100)+'%';}});
+    controller.signal.throwIfAborted();
+    mp3Url=URL.createObjectURL(blob);
+    const link=document.getElementById('mp3Save');link.href=mp3Url;
+    link.download='voicetranslator-conversation-'+new Date().toISOString().replace(/[:.]/g,'-')+'.mp3';
+    link.hidden=false;status.textContent='MP3 ready. Includes completed conversation text when you started the download.';link.click();
+  }catch(error){status.textContent=error.name==='AbortError'?'MP3 download cancelled.':error.message||'Could not prepare the MP3.';}
+  finally{if(mp3Controller===controller)mp3Controller=null;cancel.hidden=true;downloadMp3Btn.disabled=!conversationTurns.length;}
+};
+const cancelMp3Btn=document.getElementById('cancelMp3');
+if(cancelMp3Btn)cancelMp3Btn.onclick=()=>mp3Controller?.abort();
+
 
 async function createMicrophonePcmStream(sessionId){
   // Request capture before awaiting the network token: iOS requires a user gesture.
@@ -833,7 +866,7 @@ mic.onclick=async()=>{
   await startListening(false);
 };
 document.getElementById('swap').onclick=async()=>{const resumeListening=wantsListening;if(resumeListening)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);resetTranslationPipeline(true);if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}};
-document.getElementById('clear').onclick=()=>{committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';cancelVoice();resetTranslationPipeline();clearTimeout(liveVoicePauseTimer);if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript();setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
+document.getElementById('clear').onclick=()=>{clearMp3Download();committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';cancelVoice();resetTranslationPipeline();clearTimeout(liveVoicePauseTimer);if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript();setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
 copyBtn.onclick=async()=>{if(translationEl.classList.contains('placeholder'))return;try{await navigator.clipboard.writeText(translationEl.textContent);statusEl.textContent='Translation copied'}catch{statusEl.textContent='Copy failed'}};
 speakBtn.onclick=()=>{if(translationEl.classList.contains('placeholder'))return;speakText(translationEl.textContent,{replace:true})};
 if(liveVoiceToggle){
