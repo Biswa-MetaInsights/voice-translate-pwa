@@ -61,13 +61,20 @@ export async function requestTranslation(payload,{signal,onProgress=()=>{},fetch
     body:JSON.stringify({...payload,stream:true})
   });
   if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.error||'Translation failed')}
-  if(!response.headers.get('content-type')?.includes('application/x-ndjson'))return await response.json();
+  if(!response.headers.get('content-type')?.includes('application/x-ndjson')){
+    const result=await response.json();
+    if(result.targetLanguage&&result.targetLanguage!==payload.targetLanguage)throw new Error('Translation language changed during the request');
+    return result;
+  }
   const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',result;
   const accept=line=>{
     if(!line.trim())return;
     const event=JSON.parse(line);
     if(event.type==='error')throw new Error(event.error||'Translation failed');
-    if(event.type==='progress')onProgress(event.translation);
+    if(event.type==='progress'){
+      if(event.targetLanguage&&event.targetLanguage!==payload.targetLanguage)throw new Error('Translation language changed during the request');
+      onProgress(event.translation);
+    }
     if(event.type==='reset')onProgress('');
     if(event.type==='done')result=event.result;
   };
@@ -80,6 +87,7 @@ export async function requestTranslation(payload,{signal,onProgress=()=>{},fetch
     }
     accept(buffer);
     if(!result?.translation)throw new Error('Translation stream ended early');
+    if(result.targetLanguage&&result.targetLanguage!==payload.targetLanguage)throw new Error('Translation language changed during the request');
     return result;
   }finally{await reader.cancel().catch(()=>{});reader.releaseLock()}
   }finally{clearTimeout(timer);signal?.removeEventListener('abort',abort)}

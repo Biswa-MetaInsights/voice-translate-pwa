@@ -174,3 +174,28 @@ test('browser speech keeps the next partial phrase when a result also finalizes 
   assert.equal(document.getElementById('transcript').textContent,'First sentence. Next sentence');
   await tick();run('stopBrowserFallback()');
 });
+
+test('changing output language discards late progress and results from the previous target',async()=>{
+  const requests=[];
+  const {run,document}=app({requestTranslation:(job,{onProgress,signal})=>new Promise(resolve=>requests.push({job,onProgress,signal,resolve}))});
+  run("committedTranscript='Bonjour';queueFinalTranslation('Bonjour')");await tick();
+  requests[0].onProgress('Hello');
+  await run("pickerTarget='output';selectLanguage('nl-NL')");await tick();
+  assert.equal(requests[0].signal.aborted,true);
+  assert.equal(requests[1].job.targetLanguage,'nl-NL');
+  requests[0].onProgress('WRONG OLD TARGET');requests[0].resolve({translation:'WRONG OLD TARGET'});await tick();
+  assert.doesNotMatch(document.getElementById('translation').textContent,/WRONG/);
+  requests[1].resolve({translation:'Hallo',targetLanguage:'nl-NL'});await tick();
+  assert.equal(document.getElementById('translation').textContent,'Hallo');
+});
+
+test('a late speculative preview cannot overwrite the completed English phrase',async()=>{
+  const requests=[];
+  const {run,document}=app({requestTranslation:(job,{onProgress,signal})=>new Promise(resolve=>requests.push({job,onProgress,signal,resolve}))});
+  run("var preview=translateText('Bonjour')");await tick();
+  run("queueFinalTranslation('Bonjour')");await tick();
+  assert.equal(requests[0].signal.aborted,true);
+  requests[1].resolve({translation:'Hello'});await tick();
+  requests[0].onProgress('Bonjour');requests[0].resolve({translation:'Bonjour'});await run('preview');
+  assert.equal(document.getElementById('translation').textContent,'Hello');
+});

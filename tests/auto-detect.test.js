@@ -1,3 +1,4 @@
+import {assertTranslationLanguage} from '../lib/translation-language.js';
 import {createLiveText} from '../src/live-text.js';
 import {createDocument} from './helpers/dom.js';
 import { readFileSync } from 'node:fs';
@@ -13,7 +14,7 @@ const backend=readFileSync(new URL('../api/translate.js',import.meta.url),'utf8'
 
 async function request(sourceLanguage, replies, text='Bonjour', targetLanguage='en-US'){
   const calls=[];
-  const context=vm.createContext({console,process:{env:{AI_GATEWAY_API_KEY:'test'}},AbortSignal,AbortController,readCompletionStream,translationPrefix,
+  const context=vm.createContext({console,process:{env:{AI_GATEWAY_API_KEY:'test'}},AbortSignal,AbortController,readCompletionStream,translationPrefix,assertTranslationLanguage,
     fetch:async(url,options)=>{calls.push(JSON.parse(options.body));return {ok:true,json:async()=>({choices:[{message:{content:replies.shift()}}]})}}});
   vm.runInContext(backend,context);
   const res={statusCode:200,setHeader(){},status(code){this.statusCode=code;return this},json(body){this.body=body;return this}};
@@ -42,9 +43,9 @@ test('manual source keeps its plain-text response contract',async()=>{
   assert.equal(res.body.translation,'Hello');assert.equal(res.body.detectedLanguage,undefined);
   assert.match(calls[0].messages[0].content,/Translate from French to English/);
 });
-test('auto is rejected as a target and same-language manual input skips the model',async()=>{
+test('auto is rejected as a target and same-language labels still translate actual speech',async()=>{
   const invalid=await request('fr-FR',[],'Bonjour','auto');assert.equal(invalid.res.statusCode,400);
-  const same=await request('en-US',[],'Hello');assert.equal(same.res.body.translation,'Hello');assert.equal(same.calls.length,0);
+  const same=await request('en-US',['Hello'],'Bonjour');assert.equal(same.res.body.translation,'Hello');assert.equal(same.calls.length,1);
 });
 
 test('input picker, per-phrase detection, and history retry do not replay old speech',async()=>{
