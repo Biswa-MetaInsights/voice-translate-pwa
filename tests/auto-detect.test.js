@@ -1,3 +1,5 @@
+import {createLiveText} from '../src/live-text.js';
+import {createDocument} from './helpers/dom.js';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
@@ -46,16 +48,11 @@ test('auto is rejected as a target and same-language manual input skips the mode
 });
 
 test('input picker, per-phrase detection, and history retry do not replay old speech',async()=>{
-  const elements=new Map();
-  const element=()=>({value:'',textContent:'',children:[],dataset:{},classList:{toggle(){},add(){},remove(){}},
-    append(...items){this.children.push(...items)},appendChild(item){this.children.push(item)},
-    setAttribute(){},removeAttribute(){},addEventListener(){},set innerHTML(value){this.children=[]},get innerHTML(){return ''}});
-  const document={getElementById(id){if(!elements.has(id))elements.set(id,element());return elements.get(id)},
-    createElement:element,querySelectorAll:()=>[],documentElement:{dataset:{}},addEventListener(){}};
+  const document=createDocument();
   document.getElementById('inputLang').value='auto';document.getElementById('outputLang').value='en-US';
   const context=vm.createContext({document,navigator:{onLine:true,mediaDevices:{}},window:{addEventListener(){}},
     localStorage:{getItem(){return null},setItem(){}},setTimeout,clearTimeout,console,AbortController,
-    OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello',detectedLanguage:'en-US'}),splitPhrases,shouldRecover,speechProviderOptions,performance});
+    createLiveText,OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello',detectedLanguage:'en-US'}),splitPhrases,shouldRecover,speechProviderOptions,performance});
   const frontend=readFileSync(new URL('../src/main.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
   vm.runInContext(frontend,context);
   vm.runInContext("pickerTarget='input';renderLanguagePicker('auto')",context);
