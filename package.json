@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.23",
+    "@breezystack/lamejs": "1.2.7",
     "@vercel/analytics": "2.0.1",
     "@vercel/oidc": "^4.0.0",
     "ai": "^7.0.31",

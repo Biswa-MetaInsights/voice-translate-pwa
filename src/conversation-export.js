@@ -1,0 +1,56 @@
+import {splitPhrases} from './translation-client.js';
+
+export function conversationText(turns,mode='both'){
+  return turns.map(turn=>mode==='translation'?turn.translation:[turn.source,turn.translation].filter(Boolean).join('\n\n'))
+    .filter(Boolean).join('\n\n');
+}
+
+export async function createConversationMp3(turns,{mode='both',signal,onProgress=()=>{},fetchImpl=fetch,
+  audioContextFactory=()=>new (window.AudioContext||window.webkitAudioContext)({sampleRate:24000}),
+  workerFactory=()=>new Worker(new URL('./mp3-worker.js',import.meta.url),{type:'module'})}={}){
+  const text=conversationText(turns,mode).trim();
+  if(!text)throw new Error('There is no completed conversation to download yet.');
+  signal?.throwIfAborted();
+  const context=audioContextFactory();let worker;
+  try{worker=workerFactory()}catch(error){await context.close().catch(()=>{});throw error}
+  const pending=new Map();let nextId=0;
+  const fail=error=>{for(const item of pending.values())item.reject(error);pending.clear()};
+  const abort=()=>{fail(new DOMException('Download cancelled','AbortError'));worker.terminate()};
+  signal?.addEventListener('abort',abort,{once:true});
+  worker.onmessage=({data})=>{
+    const item=pending.get(data.id);if(!item)return;pending.delete(data.id);
+    if(data.error)item.reject(new Error(data.error));else item.resolve(data.parts);
+  };
+  worker.onerror=()=>fail(new Error('Could not prepare the MP3. Please try again.'));
+  const send=(type,data={},transfer=[])=>new Promise((resolve,reject)=>{
+    try{signal?.throwIfAborted();const id=nextId++;pending.set(id,{resolve,reject});worker.postMessage({id,type,...data},transfer)}catch(error){reject(error)}
+  });
+  try{
+    await send('init',{sampleRate:context.sampleRate});
+    const chunks=splitPhrases(text);
+    for(let i=0;i<chunks.length;i++){
+      signal?.throwIfAborted();onProgress({completed:i,total:chunks.length});
+      const controller=new AbortController(),abortRequest=()=>controller.abort();
+      signal?.addEventListener('abort',abortRequest,{once:true});
+      const timeout=setTimeout(abortRequest,25_000);
+      let bytes;
+      try{
+        const response=await fetchImpl('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({text:chunks[i]}),signal:controller.signal});
+        if(!response.ok)throw new Error(response.status===429?'Voice service is busy. Please try downloading again in a minute.':'Could not generate the conversation audio. Please try again.');
+        if(!response.headers.get('content-type')?.includes('audio/'))throw new Error('The voice service did not return audio.');
+        bytes=await response.arrayBuffer();
+      }finally{clearTimeout(timeout);signal?.removeEventListener('abort',abortRequest)}
+      signal?.throwIfAborted();
+      const audio=await context.decodeAudioData(bytes);
+      signal?.throwIfAborted();
+      const samples=new Float32Array(audio.getChannelData(0));
+      await send('encode',{samples},[samples.buffer]);
+    }
+    const parts=await send('finish');signal?.throwIfAborted();
+    onProgress({completed:chunks.length,total:chunks.length});
+    return new Blob(parts,{type:'audio/mpeg'});
+  }finally{
+    signal?.removeEventListener('abort',abort);worker.terminate();await context.close().catch(()=>{});
+  }
+}
