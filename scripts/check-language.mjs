@@ -13,6 +13,7 @@ jobs.push(
  {id:'wrong-source-label',sourceLanguage:'en-US',targetLanguage:'en-US',text:'Le rendez-vous est demain matin.',expect:['appointment','tomorrow morning']},
  {id:'english-preserved',sourceLanguage:'en-US',targetLanguage:'en-US',text:'The appointment is tomorrow morning.',expect:['appointment','tomorrow morning']},
  {id:'names',sourceLanguage:'fr-FR',targetLanguage:'en-US',text:'Le rendez-vous avec Jean Dupont est à Paris.',expect:['Jean Dupont','Paris']},
+ {id:'accented-names',sourceLanguage:'fr-FR',targetLanguage:'en-US',text:'Je m’appelle François et j’habite à Leuven.',expect:['François','Leuven']},
  {id:'numbers',sourceLanguage:'fr-FR',targetLanguage:'en-US',text:'La réunion est reportée au 12 novembre à 15 h 30.',expect:['12','November','15:30|3:30']},
  {id:'english-to-french',sourceLanguage:'en-US',targetLanguage:'fr-FR',text:'The meeting is tomorrow morning at nine.',expect:['réunion','demain','neuf|9']},
  {id:'french-to-dutch',sourceLanguage:'fr-FR',targetLanguage:'nl-NL',text:'La réunion est demain matin à neuf heures.',expect:['vergadering','morgen','negen|9']},

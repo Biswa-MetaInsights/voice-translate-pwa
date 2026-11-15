@@ -73,3 +73,17 @@ test('input picker, per-phrase detection, and history retry do not replay old sp
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(vm.runInContext('spokenCount',context),1);
 });
+
+test('non-stream manual translation retries French output instead of passing it through',async()=>{
+  const {res,calls}=await request('fr-FR',['Je voudrais prendre rendez-vous demain.','I would like an appointment tomorrow.'],'Je voudrais prendre rendez-vous demain.');
+  assert.equal(calls.length,2);assert.equal(res.body.translation,'I would like an appointment tomorrow.');
+});
+
+test('non-stream automatic translation also rejects copied French',async()=>{
+  const text='Merci beaucoup.';
+  const {res,calls}=await request('auto',[
+    JSON.stringify({translation:text,detectedLanguage:'fr-FR'}),
+    JSON.stringify({translation:'Thank you very much.',detectedLanguage:'fr-FR'})
+  ],text);
+  assert.equal(calls.length,2);assert.equal(res.body.translation,'Thank you very much.');
+});
