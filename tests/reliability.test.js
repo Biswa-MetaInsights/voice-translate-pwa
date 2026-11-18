@@ -99,12 +99,35 @@ test('natural voice download timeout covers audio body after headers',async()=>{
   const clock=fakeTimers();let signal;
   const {run}=app({...clock,fetch:async(_,options)=>{
     signal=options.signal;
-    return {ok:true,blob:()=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}))};
+    return {ok:true,headers:new Headers({'Content-Type':'audio/mpeg'}),blob:()=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}))};
   }});
   run("speakText('Synthetic speech')");await tick();
   const timeout=[...clock.timers.values()].find(x=>x.ms===12_000);
   assert.ok(timeout,'timeout must remain active until audio bytes finish');
   timeout.fn();await run('liveVoiceQueue');assert.equal(signal.aborted,true);
+});
+test('manual Speak can replay prepared audio with a tap if automatic playback is blocked',async()=>{
+  let audio,requests=0,gesture=false;
+  class Audio{
+    constructor(){audio=this}
+    async play(){if(this.src==='blob:voice'&&!gesture)throw new DOMException('Blocked','NotAllowedError')}
+  }
+  const {run,document}=app({Audio,URL:{createObjectURL:()=> 'blob:voice',revokeObjectURL(){}},
+    fetch:async()=>{requests++;return new Response(new Uint8Array([1]),{headers:{'Content-Type':'audio/mpeg'}})}});
+  run("speakText('Good morning',{replace:true})");await tick();
+  const button=document.getElementById('speak');
+  assert.match(button.textContent,/Play voice/);
+  gesture=true;button.onclick();await tick();audio.onended();await run('liveVoiceQueue');
+  assert.equal(requests,1);assert.equal(button.textContent,'🔊 Speak');
+});
+test('listening requests the speech token while microphone capture is starting',async()=>{
+  const clock=fakeTimers();let finishCapture;const stages=[];
+  const {run,context}=app({...clock,navigator:{onLine:true,mediaDevices:{getUserMedia(){}}},
+    fetch:async()=>{stages.push('token');return {ok:true,json:async()=>({token:'test'})}}});
+  context.capture=()=>{stages.push('microphone');return new Promise(resolve=>{finishCapture=resolve})};
+  run('createMicrophonePcmStream=capture;wantsListening=true;var listening=startListening()');
+  assert.deepEqual(stages,['microphone','token']);
+  await run('stopListening()');finishCapture(null);await run('listening');
 });
 test('speech-token timeout covers JSON body after headers',async()=>{
   const clock=fakeTimers();let signal;
@@ -201,20 +224,22 @@ test('a late speculative preview cannot overwrite the completed English phrase',
 });
 
 test('MP3 download snapshots completed turns and live translation continues while it is prepared',async()=>{
-  let finishExport,snapshot,saved=0;
+  let finishExport,snapshot;
   const {run,document}=app({
     createConversationMp3:(turns)=>{snapshot=turns;return new Promise(resolve=>finishExport=resolve)},
     URL:{createObjectURL:()=> 'blob:conversation',revokeObjectURL(){}},
     requestTranslation:async job=>({translation:job.text==='Bonjour'?'Hello':'Thank you'})
   });
-  const download=document.getElementById('downloadMp3'),link=document.getElementById('mp3Save');link.click=()=>saved++;
+  const download=document.getElementById('downloadMp3'),link=document.getElementById('mp3Save');
+  link.click=()=>assert.fail('The save link needs a direct user gesture');
   run("queueFinalTranslation('Bonjour')");await tick();assert.equal(download.disabled,false);
   const exporting=download.onclick();
+  assert.match(document.getElementById('mp3Status').textContent,/Preparing MP3/);
   run("queueFinalTranslation('Merci')");await tick();
   assert.equal(document.getElementById('translation').textContent,'Hello Thank you');
   assert.equal(snapshot.length,1);assert.equal(snapshot[0].source,'Bonjour');assert.equal(snapshot[0].translation,'Hello');
   finishExport(new Blob(['audio']));await exporting;
-  assert.equal(saved,1);assert.equal(link.href,'blob:conversation');assert.match(link.download,/\.mp3$/);
+  assert.equal(link.hidden,false);assert.equal(link.href,'blob:conversation');assert.match(link.download,/\.mp3$/);
   assert.equal(download.disabled,false);
 });
 

@@ -25,12 +25,12 @@ test('conversation export preserves both sides in speaking order and offers tran
   assert.equal(conversationText(turns),'Bonjour.\n\nHello.\n\nMerci.\n\nThank you.');
   assert.equal(conversationText(turns,'translation'),'Hello.\n\nThank you.');
 });
-test('MP3 export fetches speech, encodes it off the main thread and closes resources',async()=>{
+test('short MP3 exports reuse the returned file without browser audio or worker setup',async()=>{
   const {state,options}=harness(),progress=[];
-  const result=await createConversationMp3(turns,{...options,onProgress:x=>progress.push(x)});
-  assert.equal(result.type,'audio/mpeg');assert.equal(result.size,4);
+  const result=await createConversationMp3(turns,{...options,audioContextFactory:()=>assert.fail('Audio context is unnecessary'),
+    workerFactory:()=>assert.fail('Worker is unnecessary'),onProgress:x=>progress.push(x)});
+  assert.equal(result.type,'audio/mpeg');assert.deepEqual(new Uint8Array(await result.arrayBuffer()),new Uint8Array([1,2]));
   assert.equal(state.requests[0].url,'/api/speak');assert.equal(state.requests[0].body.text,conversationText(turns));
-  assert.equal(state.encoded,1);assert.equal(state.closed,true);assert.equal(state.terminated,true);
   assert.deepEqual(progress.at(-1),{completed:1,total:1});
 });
 test('long conversations are chunked without losing either side',async()=>{
@@ -39,6 +39,7 @@ test('long conversations are chunked without losing either side',async()=>{
   await createConversationMp3(long,options);
   assert.ok(state.requests.length>1);assert.ok(state.requests.every(x=>x.body.text.length<=2400));
   assert.equal(state.requests.map(x=>x.body.text).join(' ').replace(/\s+/g,' '),conversationText(long).replace(/\s+/g,' '));
+  assert.equal(state.encoded,state.requests.length);assert.equal(state.closed,true);assert.equal(state.terminated,true);
 });
 test('empty conversations never request audio',async()=>{
   const {state,options}=harness();await assert.rejects(()=>createConversationMp3([],options),/no completed conversation/);
@@ -46,13 +47,15 @@ test('empty conversations never request audio',async()=>{
 });
 test('voice service errors are surfaced and never downloaded as an MP3',async()=>{
   const {state,options}=harness();
-  await assert.rejects(()=>createConversationMp3(turns,{...options,fetchImpl:async()=>new Response('{}',{status:429})}),/busy/);
+  const long=[{source:'Bonjour '.repeat(500).trim()}];
+  await assert.rejects(()=>createConversationMp3(long,{...options,fetchImpl:async()=>new Response('{}',{status:429})}),/busy/);
   assert.equal(state.closed,true);assert.equal(state.terminated,true);
 });
 test('cancellation aborts an in-flight download without affecting microphone resources',async()=>{
   const {state,options}=harness(),controller=new AbortController();let requestSignal,started;
   const ready=new Promise(resolve=>started=resolve);
-  const task=createConversationMp3(turns,{...options,signal:controller.signal,fetchImpl:async(_,opts)=>{
+  const long=[{source:'Bonjour '.repeat(500).trim()}];
+  const task=createConversationMp3(long,{...options,signal:controller.signal,fetchImpl:async(_,opts)=>{
     requestSignal=opts.signal;started();return new Promise((_,reject)=>opts.signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true}));
   }});
   const rejected=assert.rejects(task,{name:'AbortError'});await ready;controller.abort();await rejected;
