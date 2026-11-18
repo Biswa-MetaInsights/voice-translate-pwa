@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {OrderedTranslationQueue,requestTranslation,splitPhrases} from '../src/translation-client.js';
 import {shouldRecover,speechProviderOptions} from '../src/audio-health.js';
+import {createPcmBuffer} from '../src/pcm-buffer.js';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const frontend=readFileSync(new URL('../src/main.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
 function app(extra={}){
@@ -13,7 +14,7 @@ function app(extra={}){
   document.getElementById('inputLang').value='fr-FR';document.getElementById('outputLang').value='en-US';
   const context=vm.createContext({document,navigator:{onLine:true,mediaDevices:{}},window:{addEventListener(){}},
     localStorage:{getItem(){return null},setItem(){}},setTimeout,clearTimeout,setInterval,clearInterval,console,AbortController,
-    createLiveText,OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello'}),splitPhrases,shouldRecover,speechProviderOptions,performance,...extra});
+    createLiveText,OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello'}),splitPhrases,shouldRecover,speechProviderOptions,createPcmBuffer,performance,...extra});
   vm.runInContext(frontend,context);return {context,document,run:code=>vm.runInContext(code,context)};
 }
 
@@ -131,6 +132,83 @@ test('old watchdog recovery cannot schedule reconnects for a newer session',asyn
   context.oldContext={close:()=>new Promise(resolve=>{closeOld=resolve;})};
   run('audioContext=oldContext;wantsListening=true;var reconnects=0;scheduleReconnect=()=>reconnects++;var recovery=recoverSpeech();++transcriptionSession');
   closeOld();await run('recovery');assert.equal(run('reconnects'),0);
+});
+
+test('slow startup and a cancelled socket preserve unsent microphone frames in order',async()=>{
+  const buffer=createPcmBuffer(()=>assert.fail('Unexpected audio loss'));
+  const frame=number=>new Uint8Array(960).fill(number);
+  for(let number=0;number<200;number++)buffer.push(frame(number));
+  const first=buffer.open().getReader();
+  assert.equal((await first.read()).value[0],0);
+  await first.cancel();
+  buffer.push(frame(200));
+  const reconnected=buffer.open().getReader();
+  for(let number=1;number<=200;number++)assert.equal((await reconnected.read()).value[0],number);
+  const liveRead=reconnected.read();
+  await tick();
+  buffer.push(frame(201));
+  assert.equal((await liveRead).value[0],201);
+  await reconnected.cancel();
+});
+
+test('exhausting the audio buffer warns once and keeps the most recent audio',async()=>{
+  let warnings=0;
+  const buffer=createPcmBuffer(()=>warnings++,2);
+  for(const value of [1,2,3,4])buffer.push(Uint8Array.of(value));
+  const reader=buffer.open().getReader();
+  assert.equal(warnings,1);
+  assert.equal((await reader.read()).value[0],3);
+  assert.equal((await reader.read()).value[0],4);
+  buffer.disconnect();
+  assert.equal((await reader.read()).done,true);
+});
+
+test('overlapping realtime segments stay visible and commit in order across a socket failure',async()=>{
+  const clock=fakeTimers();
+  const buffer=createPcmBuffer(()=>assert.fail('Unexpected audio loss'));
+  let connections=0,captures=0;
+  const {run,context,document}=app({...clock,
+    navigator:{onLine:true,mediaDevices:{getUserMedia(){}}},
+    console:{log(){},warn(){},error(){}},
+    fetch:async()=>({ok:true,json:async()=>({token:'ephemeral'})}),
+    createGateway:()=>({transcriptionModel:()=>({})}),
+    streamTranscribe:({audio})=>({fullStream:(async function*(){
+      const reader=audio.getReader();
+      if(++connections===1){
+        yield {type:'transcript-delta',id:'first',delta:'Bonjour'};
+        yield {type:'transcript-delta',id:'second',delta:'Comment'};
+        yield {type:'transcript-final',id:'first',text:'Bonjour.'};
+        assert.equal(document.getElementById('transcript').textContent,'Bonjour. Comment');
+        yield {type:'transcript-delta',id:'third',delta:'Bien'};
+        yield {type:'transcript-final',id:'third',text:'Bien.'};
+        yield {type:'transcript-delta',id:'second',delta:' allez-vous'};
+        yield {type:'transcript-final',id:'second',text:'Comment allez-vous ?'};
+        yield {type:'transcript-partial',id:'fourth',text:'Merci beaucoup'};
+        buffer.push(Uint8Array.of(12));
+        await reader.cancel();
+        yield {type:'error',error:new Error('Socket disconnected')};
+      }else{
+        assert.equal((await reader.read()).value[0],12);
+        yield {type:'transcript-final',id:'fresh',text:'À demain.'};
+        await reader.cancel();
+      }
+    })()})
+  });
+  context.capture=()=>{captures++;return buffer};
+  run(`createMicrophonePcmStream=async()=>{
+      microphoneBuffer=capture();
+      audioContext={state:'running'};
+      mediaStream={getAudioTracks:()=>[{readyState:'live'}],getTracks:()=>[]};
+      return microphoneBuffer;
+    };
+    wantsListening=true;var started=startListening()`);
+  await run('started');
+  assert.equal(document.getElementById('transcript').textContent,'Bonjour. Comment allez-vous ? Bien. Merci beaucoup');
+  await run('startListening(true)');
+  assert.equal(document.getElementById('transcript').textContent,'Bonjour. Comment allez-vous ? Bien. Merci beaucoup À demain.');
+  assert.equal(captures,1);
+  assert.equal(connections,2);
+  await run('stopListening()');
 });
 
 test('live translations retain completed DOM nodes while phrases stream, queue and finish out of order',async()=>{

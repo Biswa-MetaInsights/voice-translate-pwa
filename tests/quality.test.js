@@ -58,9 +58,10 @@ test('manual speech hints reach the provider and automatic mode remains multilin
   assert.equal(speechProviderOptions('auto').openai.streaming.delay,'low');
 });
 test('watchdog distinguishes silence from stalled audio or recognition',()=>{
-  const base={now:30_000,startedAt:0,lastAudioAt:30_000,lastVoiceAt:0,lastTranscriptAt:1000,suspended:false,hidden:false};
+  const base={now:30_000,startedAt:0,lastAudioAt:30_000,lastVoiceAt:0,voiceMs:0,lastTranscriptAt:1000,suspended:false,hidden:false};
   assert.equal(shouldRecover(base),false);
-  assert.equal(shouldRecover({...base,lastVoiceAt:29_000}),true);
+  assert.equal(shouldRecover({...base,lastVoiceAt:29_000,voiceMs:200}),false);
+  assert.equal(shouldRecover({...base,lastVoiceAt:29_000,voiceMs:6000}),true);
   assert.equal(shouldRecover({...base,lastAudioAt:10_000}),true);
   assert.equal(shouldRecover({...base,suspended:true}),true);
   assert.equal(shouldRecover({...base,suspended:true,hidden:true}),false);
