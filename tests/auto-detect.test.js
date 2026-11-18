@@ -7,7 +7,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readCompletionStream, translationPrefix } from '../lib/translation-stream.js';
 import { OrderedTranslationQueue,requestTranslation,splitPhrases } from '../src/translation-client.js';
-import { shouldRecover,speechProviderOptions } from '../src/audio-health.js';
+import { shouldRecover } from '../src/audio-health.js';
+import { speechProviderOptions } from '../lib/speech-models.js';
+import { guessSourceLanguage } from '../src/source-language.js';
 
 const backend=readFileSync(new URL('../api/translate.js',import.meta.url),'utf8')
   .replace(/^import .*;\n/gm,'').replace('export default async function handler','async function handler');
@@ -53,7 +55,7 @@ test('input picker, per-phrase detection, and history retry do not replay old sp
   document.getElementById('inputLang').value='auto';document.getElementById('outputLang').value='en-US';
   const context=vm.createContext({document,navigator:{onLine:true,mediaDevices:{}},window:{addEventListener(){}},
     localStorage:{getItem(){return null},setItem(){}},setTimeout,clearTimeout,console,AbortController,
-    createLiveText,OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello',detectedLanguage:'en-US'}),splitPhrases,shouldRecover,speechProviderOptions,performance});
+    createLiveText,OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello',detectedLanguage:'en-US'}),splitPhrases,shouldRecover,speechProviderOptions,guessSourceLanguage,performance});
   const frontend=readFileSync(new URL('../src/main.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
   vm.runInContext(frontend,context);
   vm.runInContext("pickerTarget='input';renderLanguagePicker('auto')",context);

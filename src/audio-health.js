@@ -6,8 +6,3 @@ export function shouldRecover({now,lastAudioAt,lastVoiceAt,voiceMs,lastTranscrip
   // voiced audio since the last transcript, resetting across quiet gaps.
   return voiceMs>=6000&&now-lastVoiceAt<1500&&now-lastTranscriptAt>8000;
 }
-
-export function speechProviderOptions(code) {
-  const base=code==='auto'?null:code==='yue-HK'?'yue':code==='fil-PH'?'tl':code.split('-')[0];
-  return {openai:{...(base?{language:base}:{}),streaming:{delay:'low'}}};
-}

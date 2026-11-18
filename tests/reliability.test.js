@@ -5,8 +5,10 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {OrderedTranslationQueue,requestTranslation,splitPhrases} from '../src/translation-client.js';
-import {shouldRecover,speechProviderOptions} from '../src/audio-health.js';
+import {shouldRecover} from '../src/audio-health.js';
+import {LIVE_TRANSCRIBE_MODEL,WHISPER_MODEL,speechProviderOptions} from '../lib/speech-models.js';
 import {createPcmBuffer} from '../src/pcm-buffer.js';
+import {guessSourceLanguage} from '../src/source-language.js';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const frontend=readFileSync(new URL('../src/main.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
 function app(extra={}){
@@ -14,7 +16,7 @@ function app(extra={}){
   document.getElementById('inputLang').value='fr-FR';document.getElementById('outputLang').value='en-US';
   const context=vm.createContext({document,navigator:{onLine:true,mediaDevices:{}},window:{addEventListener(){}},
     localStorage:{getItem(){return null},setItem(){}},setTimeout,clearTimeout,setInterval,clearInterval,console,AbortController,
-    createLiveText,OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello'}),splitPhrases,shouldRecover,speechProviderOptions,createPcmBuffer,performance,...extra});
+    createLiveText,OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello'}),splitPhrases,shouldRecover,speechProviderOptions,createPcmBuffer,guessSourceLanguage,LIVE_TRANSCRIBE_MODEL,WHISPER_MODEL,URLSearchParams,performance,...extra});
   vm.runInContext(frontend,context);return {context,document,run:code=>vm.runInContext(code,context)};
 }
 
@@ -83,7 +85,7 @@ test('voice backlog counts all chunks in a long spoken phrase',async()=>{
 test('transcription token failures never expose upstream secrets or text',async()=>{
   const logs=[];
   const code=readFileSync(new URL('../api/transcription-token.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export default async function handler','async function handler');
-  const context=vm.createContext({process:{env:{AI_GATEWAY_API_KEY:'SECRET_CREDENTIAL'}},console:{error:(...args)=>logs.push(args),log(){}},
+  const context=vm.createContext({LIVE_TRANSCRIBE_MODEL,WHISPER_MODEL,URL,process:{env:{AI_GATEWAY_API_KEY:'SECRET_CREDENTIAL'}},console:{error:(...args)=>logs.push(args),log(){}},
     createGateway:()=>({experimental_transcription:{getToken:async()=>{throw Object.assign(new Error('SECRET_CREDENTIAL PRIVATE_CONVERSATION'),{statusCode:401});}}})});
   vm.runInContext(code,context);
   const res={setHeader(){},status(code){this.code=code;return this},json(body){this.body=body;return this}};
@@ -92,10 +94,61 @@ test('transcription token failures never expose upstream secrets or text',async(
   assert.doesNotMatch(JSON.stringify({body:res.body,logs}),/SECRET_CREDENTIAL|PRIVATE_CONVERSATION/);
 });
 
+test('preview selects Live Transcribe while explicit comparison and production use Whisper',async()=>{
+  const code=readFileSync(new URL('../api/transcription-token.js',import.meta.url),'utf8')
+    .replace(/^import .*;\n/gm,'').replace('export default async function handler','async function handler');
+  const calls=[];
+  const env={VERCEL_ENV:'preview',AI_GATEWAY_API_KEY:'fixture'};
+  const context=vm.createContext({LIVE_TRANSCRIBE_MODEL,WHISPER_MODEL,URL,process:{env},console:{log(){},warn(){},error(){}},
+    createGateway:()=>({experimental_transcription:{getToken:async({model})=>{
+      calls.push(model);
+      if(calls.length===4)throw new Error('Live preview unavailable');
+      return {token:'ephemeral'};
+    }}})});
+  vm.runInContext(code,context);
+  async function modelFor(url){
+    const res={setHeader(){},status(){return this},json(body){this.body=body}};
+    await context.handler({method:'POST',headers:{},url},res);
+    return res.body.model;
+  }
+  assert.equal(await modelFor('/api/transcription-token'),LIVE_TRANSCRIBE_MODEL);
+  assert.equal(await modelFor('/api/transcription-token?model=whisper'),WHISPER_MODEL);
+  env.VERCEL_ENV='production';
+  assert.equal(await modelFor('/api/transcription-token?model=live'),WHISPER_MODEL);
+  env.VERCEL_ENV='preview';
+  assert.equal(await modelFor('/api/transcription-token'),WHISPER_MODEL);
+  assert.deepEqual(calls,[LIVE_TRANSCRIBE_MODEL,WHISPER_MODEL,WHISPER_MODEL,LIVE_TRANSCRIBE_MODEL,WHISPER_MODEL]);
+});
+
 function fakeTimers(){
   const timers=new Map();let next=0;
   return {timers,setTimeout:(fn,ms)=>{const id=++next;timers.set(id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id)};
 }
+
+test('continuous word updates keep the first preview timer and show a likely language locally',async()=>{
+  const clock=fakeTimers();
+  const requests=[];
+  let resolvePreview;
+  const {run,document}=app({...clock,requestTranslation:job=>{
+    requests.push(job);
+    return new Promise(resolve=>{resolvePreview=resolve});
+  }});
+  const label=document.getElementById('detectedLanguage');
+  run("input.value='auto';detectSourceWhileSpeaking('Bonjour');scheduleTranslation('Bonjour')");
+  assert.doesNotMatch(label.textContent,/French/);
+  const [[timer,scheduled]]=clock.timers;
+  run("detectSourceWhileSpeaking('Bonjour comment allez-vous');scheduleTranslation('Bonjour comment allez-vous')");
+  assert.equal(label.textContent,'Likely: French');
+  assert.equal(clock.timers.size,1);
+  assert.equal(clock.timers.get(timer),scheduled);
+  assert.equal(scheduled.ms,180);
+  scheduled.fn();
+  assert.equal(requests[0].text,'Bonjour comment allez-vous');
+  assert.equal(requests[0].sourceLanguage,'auto');
+  resolvePreview({translation:'Hello how are you?',detectedLanguage:'fr-FR'});
+  await tick();
+  assert.equal(label.textContent,'Detected: French');
+});
 test('natural voice download timeout covers audio body after headers',async()=>{
   const clock=fakeTimers();let signal;
   const {run}=app({...clock,fetch:async(_,options)=>{
@@ -123,7 +176,7 @@ test('old speech failure cannot mark a new session as microphone blocked',async(
   const {run,context}=app({...clock,navigator:{onLine:true,mediaDevices:{getUserMedia(){}}},console:{log(){},warn(){},error(){}},
     fetch:async()=>{throw new DOMException('Permission denied','NotAllowedError')}});
   context.oldContext={close:()=>new Promise(resolve=>{closeOld=resolve;})};
-  run('createMicrophonePcmStream=async()=>null;audioContext=oldContext;wantsListening=true;var failing=startListening()');await tick();
+  run("createMicrophonePcmStream=async()=>{const error=new Error('Permission denied');error.name='NotAllowedError';throw error};audioContext=oldContext;wantsListening=true;var failing=startListening()");await tick();
   assert.ok(closeOld);run('++transcriptionSession;wantsListening=isListening=true');closeOld();await run('failing');
   assert.equal(run('wantsListening&&isListening'),true);
 });

@@ -1,5 +1,6 @@
 import { createGateway } from '@ai-sdk/gateway';
 import { getVercelOidcToken } from '@vercel/oidc';
+import { LIVE_TRANSCRIBE_MODEL, WHISPER_MODEL } from '../lib/speech-models.js';
 
 const WINDOW_MS = 60_000;
 const MAX_TOKENS_PER_MINUTE = 12;
@@ -77,9 +78,20 @@ export default async function handler(req, res) {
     }
 
     const gateway = createGateway({ apiKey: credential.apiKey });
-    const { token, url } = await gateway.experimental_transcription.getToken({
-      model: 'openai/gpt-realtime-whisper',
-    });
+    const requested = new URL(req.url || '/', 'http://localhost').searchParams.get('model');
+    let model = process.env.VERCEL_ENV === 'preview' && requested !== 'whisper'
+      ? LIVE_TRANSCRIBE_MODEL : WHISPER_MODEL;
+    const issueToken = () => gateway.experimental_transcription.getToken({ model });
+    let session;
+    try {
+      session = await issueToken();
+    } catch (error) {
+      if (model === WHISPER_MODEL) throw error;
+      console.warn('Live transcription token unavailable', safeError(error));
+      model = WHISPER_MODEL;
+      session = await issueToken();
+    }
+    const { token, url } = session;
 
     if (!token) {
       console.error('AI Gateway returned no transcription token', { authSource: credential.source });
@@ -91,7 +103,7 @@ export default async function handler(req, res) {
     }
 
     console.log('Realtime transcription token created', { authSource: credential.source });
-    return res.status(200).json({ token, url });
+    return res.status(200).json({ token, url, model });
   } catch (error) {
     const info = safeError(error);
     console.error('Failed to create transcription token:', info);

@@ -3,8 +3,10 @@ import { createGateway } from '@ai-sdk/gateway';
 import { OrderedTranslationQueue, requestTranslation, splitPhrases } from './translation-client.js';
 import { createConversationMp3 } from './conversation-export.js';
 import { createLiveText } from './live-text.js';
-import { shouldRecover, speechProviderOptions } from './audio-health.js';
+import { shouldRecover } from './audio-health.js';
 import { createPcmBuffer } from './pcm-buffer.js';
+import { LIVE_TRANSCRIBE_MODEL, WHISPER_MODEL, speechProviderOptions } from '../lib/speech-models.js';
+import { guessSourceLanguage } from './source-language.js';
 
 const LANGUAGES = [
   {code:'en-US',name:'English',flag:'🇬🇧',region:'Western Europe'},
@@ -76,6 +78,7 @@ const LANGUAGES = [
 ];
 const AUTO_LANGUAGE={code:'auto',name:'Auto-detect',flag:'🌐',region:'Automatic'};
 let detectedInputLanguage=null;
+let sourceLanguageSample='',sourceLanguageVersion=0;
 
 const THEMES = [
   {id:'calm',name:'Calm',desc:'Light, soft and focused',icon:'◌'},
@@ -122,6 +125,8 @@ let lastLiveVoiceSource='';
 let audioSourceMode='mic';
 let speechController=null,healthTimer=null,healthStartedAt=0,lastAudioAt=0,lastVoiceAt=0,lastTranscriptAt=0,voiceMs=0;
 let speechRecoveryRunning=false;
+let preferWhisper=false;
+let previewText='';
 const speechSegments=new Map();
 
 function preserveInterimSpeech(){
@@ -197,10 +202,23 @@ liveVoiceEnabled=store.get('vt-live-voice',false);
 audioSourceMode=store.get('vt-audio-source','mic');
 
 function language(code){return code==='auto'?AUTO_LANGUAGE:LANGUAGES.find(l=>l.code===code)||LANGUAGES[0]}
-function showDetectedLanguage(code){
+function showDetectedLanguage(code,provisional=false){
   detectedInputLanguage=code==='mixed'||LANGUAGES.some(l=>l.code===code)?code:null;
   const label=document.getElementById('detectedLanguage');
-  if(label)label.textContent=input.value!=='auto'?'':detectedInputLanguage==='mixed'?'Detected: mixed languages':detectedInputLanguage?'Detected: '+language(detectedInputLanguage).name:'Language will be detected as you speak';
+  if(label)label.textContent=input.value!=='auto'?'':detectedInputLanguage==='mixed'?'Detected: mixed languages':detectedInputLanguage?(provisional?'Likely: ':'Detected: ')+language(detectedInputLanguage).name:'Language will be detected as you speak';
+}
+
+function detectSourceWhileSpeaking(text){
+  if(input.value!=='auto'||!text)return;
+  const sample=text.slice(-180);
+  if(sample===sourceLanguageSample||
+    (sample.startsWith(sourceLanguageSample)&&sample.length-sourceLanguageSample.length<6))return;
+  sourceLanguageSample=sample;
+  const guess=guessSourceLanguage(sample,LANGUAGES);
+  if(guess&&guess!==detectedInputLanguage){
+    sourceLanguageVersion++;
+    showDetectedLanguage(guess,true);
+  }
 }
 function normalizeSpaces(v){return v.replace(/\s+/g,' ').trim()}
 function setTranscript(){renderTranscript(committedTranscript,interimTranscript,/^(ar|he|fa|ur)(-|$)/.test(input.value)?'rtl':'auto')}
@@ -454,7 +472,9 @@ const finalTranslations=new OrderedTranslationQueue({
       document.getElementById('retryTranslation').hidden=false;
     }else{
       translatedCommitted=normalizeSpaces(translatedCommitted+' '+result.translation);
-      if(job.sourceLanguage==='auto')showDetectedLanguage(result.detectedLanguage);
+      if(job.sourceLanguage==='auto'&&job.sourceLanguageVersion===sourceLanguageVersion&&result.detectedLanguage){
+        showDetectedLanguage(result.detectedLanguage);
+      }
       translationState.textContent=(result.needsReview?'Check unclear phrase · ':'Live · ')+result.endToEndMs+'ms';
       if(liveVoiceEnabled&&job.voiceGeneration===liveVoiceGeneration)speakText(result.translation);
     }
@@ -464,7 +484,7 @@ const finalTranslations=new OrderedTranslationQueue({
 function showTranslatedText(){setTranslation(translatedCommitted,translatedInterim)}
 function resetTranslationPipeline(retranslateHistory=false){
   ++translationEpoch;++translateSequence;cancelVoice();
-  clearTimeout(translateTimer);
+  clearTimeout(translateTimer);translateTimer=null;previewText='';sourceLanguageSample='';sourceLanguageVersion++;
   if(translateController)translateController.abort();
   translateController=null;finalTranslations.clear();
   recentSourcePhrases=[];translationFailures=false;
@@ -476,16 +496,20 @@ function resetTranslationPipeline(retranslateHistory=false){
   if(retranslateHistory&&committedTranscript)queueFinalTranslation(committedTranscript,{speak:false});
   if(retranslateHistory&&interimTranscript)scheduleTranslation(interimTranscript);
 }
-function scheduleTranslation(text,immediate=false){
-  const clean=normalizeSpaces(text||'');clearTimeout(translateTimer);
-  if(!clean||pendingTranslations||clean===lastInterimText)return;
-  // Previews are optional and never compete with completed phrases.
+function scheduleTranslation(text){
+  previewText=normalizeSpaces(text||'');
+  if(!previewText||pendingTranslations||previewText===lastInterimText||translateTimer!==null)return;
+  // Keep the first timer while words arrive and translate the newest snapshot.
   const untilReady=Math.max(0,1500-(Date.now()-lastPreviewAt));
-  translateTimer=setTimeout(()=>translateText(clean),Math.max(immediate?0:300,untilReady));
+  translateTimer=setTimeout(()=>{
+    translateTimer=null;
+    translateText(previewText);
+  },Math.max(180,untilReady));
 }
 async function translateText(text){
   if(!text||text===lastInterimText||pendingTranslations)return;
   const epoch=translationEpoch,seq=++translateSequence;
+  const detectionVersion=sourceLanguageVersion;
   if(translateController)translateController.abort();
   const controller=new AbortController();translateController=controller;
   lastInterimText=text;lastPreviewAt=Date.now();
@@ -495,19 +519,23 @@ async function translateText(text){
         if(epoch===translationEpoch&&seq===translateSequence&&!pendingTranslations){translatedInterim=translation;showTranslatedText()}
       }});
     if(epoch!==translationEpoch||seq!==translateSequence||pendingTranslations)return;
+    if(input.value==='auto'&&detectionVersion===sourceLanguageVersion&&data.detectedLanguage){
+      showDetectedLanguage(data.detectedLanguage);
+    }
     translatedInterim=normalizeSpaces(data.translation||'');showTranslatedText();translationState.textContent='Preview';
   }catch(error){if(error.name!=='AbortError'&&epoch===translationEpoch&&seq===translateSequence)lastInterimText=''}
 }
 function queueFinalTranslation(phrase,{speak=true}={}){
   const text=normalizeSpaces(phrase||'');if(!text)return;
-  ++translateSequence;clearTimeout(translateTimer);
+  detectSourceWhileSpeaking(text);
+  ++translateSequence;clearTimeout(translateTimer);translateTimer=null;previewText='';
   if(translateController)translateController.abort();translateController=null;
   // Keep the current preview/stream visible while another phrase is queued.
   lastInterimText='';
   for(const chunk of splitPhrases(text)){
     finalTranslations.push({text:chunk,sourceLanguage:input.value,targetLanguage:output.value,
       quality:document.getElementById('translationQuality').value||'accurate',context:[...recentSourcePhrases],
-      capturedAt:performance.now(),voiceGeneration:speak?liveVoiceGeneration:-1});
+      sourceLanguageVersion,capturedAt:performance.now(),voiceGeneration:speak?liveVoiceGeneration:-1});
     recentSourcePhrases=[...recentSourcePhrases,chunk].slice(-3);
   }
 }
@@ -758,6 +786,8 @@ async function startListening(isReconnect=false){
   }
 
   let failureStage='microphone';
+  let speechModel=WHISPER_MODEL;
+  let receivedRealtimeEvent=false;
   try{
     const sessionController=new AbortController();speechController=sessionController;
     setDiagnostic('microphone','pending');
@@ -765,7 +795,9 @@ async function startListening(isReconnect=false){
     const captureTask=microphoneBuffer||createMicrophonePcmStream(sessionId);
     setDiagnostic('token','pending');
     const tokenTimeout=setTimeout(()=>sessionController.abort(),20_000);
-    const tokenTask=fetch('/api/transcription-token',{method:'POST',signal:sessionController.signal})
+    const compareWithWhisper=new URLSearchParams(window.location?.search).get('speech')==='whisper';
+    const tokenUrl='/api/transcription-token'+(preferWhisper||compareWithWhisper?'?model=whisper':'');
+    const tokenTask=fetch(tokenUrl,{method:'POST',signal:sessionController.signal})
       .then(async response=>({response,data:await response.json().catch(()=>({}))}))
       .catch(error=>({error})).finally(()=>clearTimeout(tokenTimeout));
     const capture=await captureTask;
@@ -778,19 +810,19 @@ async function startListening(isReconnect=false){
     if(tokenError)throw tokenError;
     if(!tokenResponse.ok||!tokenData.token){const detail=tokenData.detail?': '+tokenData.detail:'';throw new Error((tokenData.error||'Speech service unavailable')+detail+' (HTTP '+tokenResponse.status+')');}
     setDiagnostic('token','ok');
+    speechModel=tokenData.model===LIVE_TRANSCRIBE_MODEL?LIVE_TRANSCRIBE_MODEL:WHISPER_MODEL;
     const gateway=createGateway({apiKey:tokenData.token});
     failureStage='realtime';
     setDiagnostic('realtime','pending');
     startAudioHealth();
     const result=streamTranscribe({
-      model:gateway.transcriptionModel('openai/gpt-realtime-whisper'),
+      model:gateway.transcriptionModel(speechModel),
       audio:capture.open(),
       inputAudioFormat:{type:'audio/pcm',rate:24000},
-      providerOptions:speechProviderOptions(input.value),
+      providerOptions:speechProviderOptions(input.value,speechModel),
       abortSignal:sessionController.signal
     });
 
-    let receivedRealtimeEvent=false;
     statusEl.innerHTML='<span class="liveDot"></span>Listening — tap again to stop';
     speechState.textContent='Listening';
     noteUse(input.value);
@@ -827,11 +859,17 @@ async function startListening(isReconnect=false){
       interimTranscript=normalizeSpaces([...speechSegments.values()].map(segment=>segment.text).join(' '));
       setTranscript();
       speechState.textContent=interimTranscript?'Hearing you…':'Captured';
-      if(interimTranscript)scheduleTranslation(interimTranscript);
+      if(interimTranscript){
+        detectSourceWhileSpeaking(interimTranscript);
+        scheduleTranslation(interimTranscript);
+      }
     }
 
     if(wantsListening&&sessionId===transcriptionSession){
-      if(!receivedRealtimeEvent)setDiagnostic('realtime','error','Realtime stream ended before any transcript event');
+      if(!receivedRealtimeEvent){
+        if(speechModel===LIVE_TRANSCRIBE_MODEL)preferWhisper=true;
+        setDiagnostic('realtime','error','Realtime stream ended before any transcript event');
+      }
       preserveInterimSpeech();
       await cleanupAudio({keepCapture:true});
       if(sessionId===transcriptionSession)scheduleReconnect();
@@ -844,23 +882,21 @@ async function startListening(isReconnect=false){
     const name=error?.name||'';
     const message=String(error?.message||'').toLowerCase();
     const permissionDenied =
-      name==='NotAllowedError' ||
-      name==='SecurityError' ||
-      message.includes('permission') ||
-      message.includes('not allowed');
+      failureStage==='microphone'&&(name==='NotAllowedError'||name==='SecurityError'||
+      message.includes('permission')||message.includes('not allowed'));
 
     const noMic =
-      name==='NotFoundError' ||
-      message.includes('no microphone') ||
-      message.includes('requested device not found');
+      failureStage==='microphone'&&(name==='NotFoundError'||message.includes('no microphone')||
+      message.includes('requested device not found'));
 
+    if(speechModel===LIVE_TRANSCRIBE_MODEL&&!receivedRealtimeEvent)preferWhisper=true;
     preserveInterimSpeech();
     await cleanupAudio({keepCapture:failureStage!=='microphone'&&!permissionDenied&&!noMic});
     if(sessionId!==transcriptionSession)return;
     if(permissionDenied){
       wantsListening=false;
       clearTimeout(reconnectTimer);
-      mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');
+      mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');mic.setAttribute('aria-pressed','false');
       speechState.textContent='Microphone blocked';
       statusEl.textContent='Microphone access is blocked. On iPhone, open this page in Safari and allow microphone access.';
       return;
@@ -868,7 +904,7 @@ async function startListening(isReconnect=false){
 
     if(noMic){
       wantsListening=false;
-      mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');
+      mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');mic.setAttribute('aria-pressed','false');
       speechState.textContent='No microphone';
       statusEl.textContent='No microphone was found on this device.';
       return;
@@ -898,6 +934,7 @@ mic.onclick=async()=>{
   if(liveVoiceEnabled){primeNaturalVoice();primeSpeechSynthesis()}
   wantsListening=true;
   usingBrowserFallback=false;
+  preferWhisper=false;
   reconnectAttempts=0;
   resetDiagnostics();
   await startListening(false);

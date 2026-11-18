@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OrderedTranslationQueue,requestTranslation,splitPhrases } from '../src/translation-client.js';
-import { shouldRecover,speechProviderOptions } from '../src/audio-health.js';
+import { shouldRecover } from '../src/audio-health.js';
+import { LIVE_TRANSCRIBE_MODEL, speechProviderOptions } from '../lib/speech-models.js';
 import { readCompletionStream,translationPrefix } from '../lib/translation-stream.js';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -56,6 +57,8 @@ test('manual speech hints reach the provider and automatic mode remains multilin
   assert.equal(speechProviderOptions('fil-PH').openai.language,'tl');
   assert.equal(speechProviderOptions('auto').openai.language,undefined);
   assert.equal(speechProviderOptions('auto').openai.streaming.delay,'low');
+  assert.deepEqual(speechProviderOptions('fr-FR',LIVE_TRANSCRIBE_MODEL).openai.languages,['fr']);
+  assert.equal(speechProviderOptions('auto',LIVE_TRANSCRIBE_MODEL).openai.languages,undefined);
 });
 test('watchdog distinguishes silence from stalled audio or recognition',()=>{
   const base={now:30_000,startedAt:0,lastAudioAt:30_000,lastVoiceAt:0,voiceMs:0,lastTranscriptAt:1000,suspended:false,hidden:false};
