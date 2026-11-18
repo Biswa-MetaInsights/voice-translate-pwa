@@ -206,6 +206,8 @@ function chooseSpeechVoice(lang){
 
 let activeVoiceAudio=null,voiceRequestController=null,queuedVoiceCount=0;
 let naturalVoicePlayer=null;
+let retryVoicePlayback=null;
+const speakStatus=document.getElementById('speakStatus');
 function primeNaturalVoice(){
   if(typeof Audio==='undefined')return;
   if(!naturalVoicePlayer)naturalVoicePlayer=new Audio();
@@ -217,55 +219,81 @@ function cancelVoice(){
   if(voiceRequestController)voiceRequestController.abort();
   if(activeVoiceAudio){activeVoiceAudio.pause();activeVoiceAudio.dispatchEvent(new Event('ended'));activeVoiceAudio=null}
   if('speechSynthesis' in window)speechSynthesis.cancel();
+  retryVoicePlayback?.cancel();retryVoicePlayback=null;
+  speakBtn.textContent='🔊 Speak';speakStatus.textContent='';
   liveVoiceQueue=Promise.resolve();
 }
-function deviceSpeak(text,lang){
+function deviceSpeak(text,lang,onError=()=>{}){
   const voice=chooseSpeechVoice(lang);
   if(!voice||!('SpeechSynthesisUtterance' in window)){
-    statusEl.textContent='No matching device voice. Select Natural voice or another translation language.';return Promise.resolve();
+    onError('No matching device voice. Select Natural voice.');return Promise.resolve();
   }
   return new Promise(resolve=>{
     const utterance=new SpeechSynthesisUtterance(text);utterance.lang=lang;utterance.voice=voice;
-    utterance.onend=resolve;utterance.onerror=resolve;
+    utterance.onend=resolve;
+    utterance.onerror=event=>{if(!['canceled','interrupted'].includes(event.error))onError('Device voice could not play. Try Natural voice.');resolve()};
     speechSynthesis.resume();speechSynthesis.speak(utterance);
   });
 }
 function speakText(text,{replace=false}={}){
   const clean=normalizeSpaces(text||'');if(!clean)return false;
-  if(replace){cancelVoice();primeNaturalVoice()}
-  const generation=liveVoiceGeneration,lang=output.value;
   const natural=document.getElementById('voiceQuality').value!=='device';
-  const chunks=splitPhrases(clean);
+  if(replace){cancelVoice();if(natural)primeNaturalVoice()}
+  const generation=liveVoiceGeneration,lang=output.value;
+  const report=message=>{if(generation===liveVoiceGeneration)speakStatus.textContent=message};
+  const chunks=splitPhrases(clean,natural&&replace?600:2400);
+  if(replace)report(natural?'Preparing voice…':'Playing device voice…');
+  let failed=false;
+  const reportFailure=message=>{failed=true;report(message)};
+  const immediateDevice=replace&&!natural?deviceSpeak(chunks[0],lang,reportFailure):null;
   queuedVoiceCount+=chunks.length;
   if(queuedVoiceCount>3)liveVoiceState.textContent='Catching up';
-  for(const chunk of chunks)liveVoiceQueue=liveVoiceQueue.catch(()=>{}).then(async()=>{
+  for(const [index,chunk] of chunks.entries())liveVoiceQueue=liveVoiceQueue.catch(()=>{}).then(async()=>{
     if(generation!==liveVoiceGeneration)return;
     try{
-      if(!natural){await deviceSpeak(chunk,lang);return}
+      if(!natural){await (index===0&&immediateDevice?immediateDevice:deviceSpeak(chunk,lang,reportFailure));return}
       const requestController=new AbortController();voiceRequestController=requestController;
       const timeout=setTimeout(()=>requestController.abort(),12_000);
       let blob;
       try{
         const response=await fetch('/api/speak',{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({text:chunk}),signal:requestController.signal});
-        if(!response.ok)throw new Error('Natural voice unavailable');
+        if(!response.ok||!response.headers.get('content-type')?.includes('audio/'))throw new Error('Natural voice unavailable');
         blob=await response.blob();
       }finally{clearTimeout(timeout);if(voiceRequestController===requestController)voiceRequestController=null}
       if(generation!==liveVoiceGeneration)return;
       const url=URL.createObjectURL(blob),player=naturalVoicePlayer||new Audio();player.src=url;activeVoiceAudio=player;
       try{
-        await new Promise((resolve,reject)=>{player.onended=resolve;player.onerror=reject;player.play().catch(reject)});
-      }finally{URL.revokeObjectURL(url);if(activeVoiceAudio===player)activeVoiceAudio=null}
+        await new Promise((resolve,reject)=>{
+          player.onended=resolve;player.onerror=reject;
+          const play=()=>player.play().then(()=>{
+            if(generation!==liveVoiceGeneration)return;
+            retryVoicePlayback=null;speakBtn.textContent='🔊 Speak';report('Playing voice…');
+          }).catch(error=>{
+            if(replace&&error.name==='NotAllowedError'&&generation===liveVoiceGeneration){
+              retryVoicePlayback={play,cancel:resolve};speakBtn.textContent='▶ Play voice';report('Voice ready. Tap Play voice.');
+            }else reject(error);
+          });
+          play();
+        });
+      }finally{
+        URL.revokeObjectURL(url);
+        if(activeVoiceAudio===player)activeVoiceAudio=null;
+        if(generation===liveVoiceGeneration){retryVoicePlayback=null;speakBtn.textContent='🔊 Speak'}
+      }
     }catch(error){
       if(generation!==liveVoiceGeneration)return;
       if(error?.name==='NotAllowedError'){
         liveVoiceEnabled=false;renderLiveVoice();
         statusEl.textContent='Tap Speak to allow translated voice playback on this device';return;
       }
-      statusEl.textContent='Natural voice unavailable — using a matching device voice when available';
-      await deviceSpeak(chunk,lang);
+      report('Natural voice unavailable. Trying device voice…');
+      await deviceSpeak(chunk,lang,reportFailure);
     }finally{
-      if(generation===liveVoiceGeneration){queuedVoiceCount=Math.max(0,queuedVoiceCount-1);renderLiveVoice()}
+      if(generation===liveVoiceGeneration){
+        queuedVoiceCount=Math.max(0,queuedVoiceCount-1);renderLiveVoice();
+        if(replace&&index===chunks.length-1&&!failed)report('');
+      }
     }
   });
   return true;
@@ -510,7 +538,7 @@ if(downloadMp3Btn)downloadMp3Btn.onclick=async()=>{
   clearMp3Download();
   const controller=new AbortController();mp3Controller=controller;
   const status=document.getElementById('mp3Status'),cancel=document.getElementById('cancelMp3');
-  downloadMp3Btn.disabled=true;cancel.hidden=false;
+  downloadMp3Btn.disabled=true;cancel.hidden=false;status.textContent='Preparing MP3…';
   const snapshot=conversationTurns.map(turn=>({...turn}));
   try{
     const blob=await createConversationMp3(snapshot,{mode:document.getElementById('mp3Content').value||'both',signal:controller.signal,
@@ -519,7 +547,7 @@ if(downloadMp3Btn)downloadMp3Btn.onclick=async()=>{
     mp3Url=URL.createObjectURL(blob);
     const link=document.getElementById('mp3Save');link.href=mp3Url;
     link.download='voicetranslator-conversation-'+new Date().toISOString().replace(/[:.]/g,'-')+'.mp3';
-    link.hidden=false;status.textContent='MP3 ready. Includes completed conversation text when you started the download.';link.click();
+    link.hidden=false;status.textContent='MP3 ready. Tap Save conversation MP3.';
   }catch(error){status.textContent=error.name==='AbortError'?'MP3 download cancelled.':error.message||'Could not prepare the MP3.';}
   finally{if(mp3Controller===controller)mp3Controller=null;cancel.hidden=true;downloadMp3Btn.disabled=!conversationTurns.length;}
 };
@@ -735,21 +763,21 @@ async function startListening(isReconnect=false){
 
   let failureStage='microphone';
   try{
+    const sessionController=new AbortController();speechController=sessionController;
     setDiagnostic('microphone','pending');
-    const microphoneStream=await createMicrophonePcmStream(sessionId);
+    const microphoneTask=createMicrophonePcmStream(sessionId);
+    setDiagnostic('token','pending');
+    const tokenTimeout=setTimeout(()=>sessionController.abort(),20_000);
+    const tokenTask=fetch('/api/transcription-token',{method:'POST',signal:sessionController.signal})
+      .then(async response=>({response,data:await response.json().catch(()=>({}))}))
+      .catch(error=>({error})).finally(()=>clearTimeout(tokenTimeout));
+    const microphoneStream=await microphoneTask;
     if(!wantsListening||sessionId!==transcriptionSession)return;
     setDiagnostic('microphone','ok');
-
     failureStage='token';
-    setDiagnostic('token','pending');
-    const sessionController=new AbortController();speechController=sessionController;
-    const tokenTimeout=setTimeout(()=>sessionController.abort(),20_000);
-    let tokenResponse,tokenData;
-    try{
-      tokenResponse=await fetch('/api/transcription-token',{method:'POST',signal:sessionController.signal});
-      tokenData=await tokenResponse.json().catch(()=>({}));
-    }finally{clearTimeout(tokenTimeout)}
+    const {response:tokenResponse,data:tokenData,error:tokenError}=await tokenTask;
     if(!wantsListening||sessionId!==transcriptionSession)return;
+    if(tokenError)throw tokenError;
     if(!tokenResponse.ok||!tokenData.token){const detail=tokenData.detail?': '+tokenData.detail:'';throw new Error((tokenData.error||'Speech service unavailable')+detail+' (HTTP '+tokenResponse.status+')');}
     setDiagnostic('token','ok');
     const gateway=createGateway({apiKey:tokenData.token});
@@ -770,12 +798,12 @@ async function startListening(isReconnect=false){
     noteUse(input.value);
 
     for await(const part of result.fullStream){
-      if(!receivedRealtimeEvent&&(part.type==='transcript-delta'||part.type==='transcript-final')){
+      if(!wantsListening||sessionId!==transcriptionSession)break;
+      if(!receivedRealtimeEvent&&['transcript-delta','transcript-partial','transcript-final'].includes(part.type)){
         receivedRealtimeEvent=true;
         reconnectAttempts=0;
         setDiagnostic('realtime','ok');
       }
-      if(!wantsListening||sessionId!==transcriptionSession)break;
       if(part.type==='transcript-delta'||part.type==='transcript-partial'||part.type==='transcript-final')lastTranscriptAt=Date.now();
       if(part.type==='transcript-delta'){
         interimTranscript+=part.delta||'';
@@ -868,7 +896,11 @@ mic.onclick=async()=>{
 document.getElementById('swap').onclick=async()=>{const resumeListening=wantsListening;if(resumeListening)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);resetTranslationPipeline(true);if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}};
 document.getElementById('clear').onclick=()=>{clearMp3Download();committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';cancelVoice();resetTranslationPipeline();clearTimeout(liveVoicePauseTimer);if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript();setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
 copyBtn.onclick=async()=>{if(translationEl.classList.contains('placeholder'))return;try{await navigator.clipboard.writeText(translationEl.textContent);statusEl.textContent='Translation copied'}catch{statusEl.textContent='Copy failed'}};
-speakBtn.onclick=()=>{if(translationEl.classList.contains('placeholder'))return;speakText(translationEl.textContent,{replace:true})};
+speakBtn.onclick=()=>{
+  if(retryVoicePlayback){retryVoicePlayback.play();return}
+  if(translationEl.classList.contains('placeholder')){speakStatus.textContent='Start a translation to play it here.';return}
+  speakText(translationEl.textContent,{replace:true});
+};
 if(liveVoiceToggle){
   liveVoiceToggle.onchange=()=>{
     liveVoiceEnabled=Boolean(liveVoiceToggle.checked);
