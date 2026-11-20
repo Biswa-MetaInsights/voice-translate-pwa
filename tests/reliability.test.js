@@ -416,3 +416,29 @@ test('Clear cancels an export and removes its conversation snapshot from the scr
   assert.equal(document.getElementById('mp3Save').hidden,true);
   assert.equal(document.getElementById('translation').textContent,'Your translation will appear here.');
 });
+
+test('conversation finishes each turn before reversing languages and preserves both turns for export',async()=>{
+  const requests=[];
+  const {run,document}=app({requestTranslation:async(job,{onProgress})=>{
+    requests.push([job.sourceLanguage,job.targetLanguage,job.text]);
+    onProgress(job.targetLanguage==='en-US'?'Good':'Bon');
+    return {translation:job.targetLanguage==='en-US'?'Good morning':'Bonjour'};
+  }});
+  await run("setAudioSource('conversation')");
+  run("beginListening=async()=>{wantsListening=true}; conversationLanguages=['en-US','fr-FR']");
+  await run('startConversationTurn()');
+  run("interimTranscript='Good morning'");
+  await run('endConversationTurn()');
+  await tick();
+  assert.equal(document.getElementById('conversationAction').textContent,'Person 2 · Speak');
+  assert.equal(document.getElementById('conversationHistory').children[0].children[2].textContent,'Bonjour');
+  await run('startConversationTurn()');
+  run("interimTranscript='Bonjour'");
+  await run('endConversationTurn(true)');
+  await tick();
+  assert.equal(document.getElementById('conversationAction').textContent,'Start conversation');
+  assert.equal(document.getElementById('conversationHistory').children[1].children[2].textContent,'Good morning');
+  assert.deepEqual(requests,[['en-US','fr-FR','Good morning'],['fr-FR','en-US','Bonjour']]);
+  assert.equal(run('conversationTurns.length'),2);
+  assert.equal(document.getElementById('downloadMp3').disabled,false);
+});

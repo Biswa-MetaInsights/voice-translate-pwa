@@ -106,6 +106,11 @@ const liveVoiceToggle=document.getElementById('liveVoiceToggle');
 const liveVoiceState=document.getElementById('liveVoiceState');
 const micSourceBtn=document.getElementById('micSourceBtn');
 const meetingSourceBtn=document.getElementById('meetingSourceBtn');
+const conversationSourceBtn=document.getElementById('conversationSourceBtn');
+const conversationControls=document.getElementById('conversationControls');
+const conversationAction=document.getElementById('conversationAction');
+const conversationEnd=document.getElementById('conversationEnd');
+const conversationHistory=document.getElementById('conversationHistory');
 const sourceHint=document.getElementById('sourceHint');
 
 let isListening=false, committedTranscript='', interimTranscript='';
@@ -123,6 +128,9 @@ const downloadMp3Btn=document.getElementById('downloadMp3');
 let liveVoicePauseTimer=null;
 let lastLiveVoiceSource='';
 let audioSourceMode='mic';
+let conversationLanguages=['en-US','fr-FR'];
+let regularLanguages=null,conversationPhase='idle',conversationSpeaker=0,conversationEnding=false;
+let conversationTurnOffset=0,conversationLastPlayback=null,changingAudioSource=false;
 let speechController=null,healthTimer=null,healthStartedAt=0,lastAudioAt=0,lastVoiceAt=0,lastTranscriptAt=0,voiceMs=0;
 let speechRecoveryRunning=false;
 let preferWhisper=false;
@@ -199,7 +207,7 @@ let favorites=store.get('vt-favorites',['en-US','fr-FR']);
 let recents=store.get('vt-recents',['en-US','fr-FR']);
 let counts=store.get('vt-counts',{});
 liveVoiceEnabled=store.get('vt-live-voice',false);
-audioSourceMode=store.get('vt-audio-source','mic');
+audioSourceMode=store.get('vt-audio-source','mic')==='meeting'?'meeting':'mic';
 
 function language(code){return code==='auto'?AUTO_LANGUAGE:LANGUAGES.find(l=>l.code===code)||LANGUAGES[0]}
 function showDetectedLanguage(code,provisional=false){
@@ -269,11 +277,11 @@ function deviceSpeak(text,lang,onError=()=>{}){
     speechSynthesis.resume();speechSynthesis.speak(utterance);
   });
 }
-function speakText(text,{replace=false}={}){
+function speakText(text,{replace=false,lang=output.value}={}){
   const clean=normalizeSpaces(text||'');if(!clean)return false;
   const natural=document.getElementById('voiceQuality').value!=='device';
   if(replace){cancelVoice();if(natural)primeNaturalVoice()}
-  const generation=liveVoiceGeneration,lang=output.value;
+  const generation=liveVoiceGeneration;
   const report=message=>{if(generation===liveVoiceGeneration)speakStatus.textContent=message};
   const chunks=splitPhrases(clean,natural&&replace?600:2400);
   if(replace)report(natural?'Preparing voice…':'Playing device voice…');
@@ -359,27 +367,144 @@ function renderLiveVoice(){
 // No secondary translation call or one-second speech delay is necessary.
 
 async function setAudioSource(mode){
-  const next=mode==='meeting'?'meeting':'mic';
-  if(next===audioSourceMode)return;
-  const resume=wantsListening;
-  if(resume)await stopListening(false);
-  audioSourceMode=next;
-  store.set('vt-audio-source',audioSourceMode);
-  renderAudioSource();
-  if(resume){
-    wantsListening=true;
-    reconnectAttempts=0;
-    await startListening(false);
-  }
+  if(mode===audioSourceMode||changingAudioSource)return;
+  changingAudioSource=true;
+  try{
+    const previous=audioSourceMode;
+    const conversationChange=mode==='conversation'||previous==='conversation';
+    const resume=wantsListening;
+    if(resume||isListening)await stopListening(false);
+    if(previous==='conversation'){
+      [input.value,output.value]=regularLanguages;
+      conversationPhase='idle';
+      clearConversationView();
+    }
+    if(mode==='conversation'){
+      regularLanguages=[input.value,output.value];
+      const first=input.value==='auto'?'en-US':input.value;
+      const second=output.value===first?(first==='fr-FR'?'en-US':'fr-FR'):output.value;
+      conversationLanguages=[first,second];
+      clearConversationView();
+      statusEl.textContent='Choose both languages, then start.';
+    }
+    audioSourceMode=mode;
+    if(mode!=='conversation')store.set('vt-audio-source',mode);
+    updateLanguageButtons();renderAudioSource();
+    if(conversationChange&&mode!=='conversation')statusEl.textContent='Tap the microphone and start speaking';
+    if(resume&&!conversationChange){
+      wantsListening=true;
+      reconnectAttempts=0;
+      await startListening(false);
+    }
+  }finally{changingAudioSource=false}
 }
 
 function renderAudioSource(){
-  if(!micSourceBtn||!meetingSourceBtn||!sourceHint)return;
-  micSourceBtn.classList.toggle('active',audioSourceMode==='mic');
-  meetingSourceBtn.classList.toggle('active',audioSourceMode==='meeting');
-  sourceHint.textContent=audioSourceMode==='meeting'
-    ? 'Meeting audio captures sound from a shared tab/screen. When prompted, share the meeting and enable audio.'
-    : 'Microphone mode listens to your voice.';
+  for(const [mode,button] of [['mic',micSourceBtn],['meeting',meetingSourceBtn],['conversation',conversationSourceBtn]]){
+    const selected=audioSourceMode===mode;
+    button.classList.toggle('active',selected);
+    button.setAttribute('aria-pressed',String(selected));
+  }
+  sourceHint.textContent={
+    meeting:'Meeting audio captures sound from a shared tab/screen. When prompted, share the meeting and enable audio.',
+    mic:'Microphone mode listens to your voice.',
+    conversation:'Share one microphone. Finish your turn, then pass the phone to the other person.',
+  }[audioSourceMode];
+  renderConversationControls();
+}
+
+function renderConversationControls(){
+  const inConversation=audioSourceMode==='conversation';
+  const busy=['stopping','finishing'].includes(conversationPhase);
+  const active=conversationPhase!=='idle';
+  conversationControls.hidden=conversationHistory.hidden=!inConversation;
+  mic.hidden=inConversation;
+  conversationAction.disabled=busy||conversationLanguages[0]===conversationLanguages[1];
+  conversationAction.textContent=busy?'Finishing turn…':conversationPhase==='listening'?'Finish turn':
+    active?'Person '+(conversationSpeaker+1)+' · Speak':'Start conversation';
+  conversationEnd.hidden=!active;
+  conversationEnd.disabled=busy;
+  document.getElementById('inputPicker').disabled=inConversation&&active;
+  document.getElementById('outputPicker').disabled=inConversation&&active;
+}
+
+function clearConversationView(){
+  clearMp3Download();
+  conversationHistory.replaceChildren();
+  conversationLastPlayback=null;
+  conversationEnding=false;
+  committedTranscript=interimTranscript='';
+  speechSegments.clear();
+  resetTranslationPipeline();
+  setTranscript();
+}
+
+async function startConversationTurn(){
+  if(changingAudioSource||!['idle','ready'].includes(conversationPhase)||conversationLanguages[0]===conversationLanguages[1])return;
+  if(conversationPhase==='idle'){
+    clearConversationView();
+    conversationSpeaker=0;
+  }else{
+    cancelVoice();
+    committedTranscript=interimTranscript=translatedCommitted=translatedInterim='';
+    lastInterimText='';lastPreviewAt=0;
+    recentSourcePhrases=[];
+    setTranscript();showTranslatedText();
+  }
+  input.value=conversationLanguages[conversationSpeaker];
+  output.value=conversationLanguages[1-conversationSpeaker];
+  conversationTurnOffset=conversationTurns.length;
+  conversationLastPlayback=null;
+  conversationPhase='listening';
+  renderConversationControls();
+  if(liveVoiceEnabled){primeNaturalVoice();primeSpeechSynthesis()}
+  await beginListening();
+  if(conversationPhase==='listening'&&!wantsListening){
+    conversationPhase=conversationHistory.children.length?'ready':'idle';
+    renderConversationControls();
+  }
+}
+
+function finishConversationTurn(){
+  if(conversationPhase!=='finishing'||pendingTranslations)return;
+  const turns=conversationTurns.slice(conversationTurnOffset);
+  const source=turns.map(turn=>turn.source).join(' ');
+  const translation=turns.map(turn=>turn.translation).filter(Boolean).join(' ');
+  if(source){
+    const row=document.createElement('li');row.className='conversationTurn';row.dataset.person=String(conversationSpeaker+1);
+    const heading=document.createElement('strong');heading.textContent='Person '+(conversationSpeaker+1)+' · '+language(input.value).name+' → '+language(output.value).name;
+    const original=document.createElement('p');original.textContent=source;original.lang=input.value;original.dir='auto';
+    const translated=document.createElement('p');translated.textContent=translation||'Translation unavailable';translated.lang=output.value;translated.dir='auto';
+    row.append(heading,original,translated);
+    if(translation){
+      const playback={text:translation,lang:output.value};
+      conversationLastPlayback=playback;
+      const play=document.createElement('button');play.type='button';play.className='btn';play.textContent='▶ Play translation';
+      play.onclick=()=>{if(conversationPhase==='ready'||conversationPhase==='idle')speakText(playback.text,{replace:true,lang:playback.lang})};
+      row.append(play);
+      if(liveVoiceEnabled)speakText(playback.text,{lang:playback.lang});
+    }
+    conversationHistory.append(row);
+    conversationSpeaker=1-conversationSpeaker;
+  }
+  conversationPhase=conversationEnding?'idle':'ready';
+  statusEl.textContent=conversationEnding?'Conversation ended. You can play or download it.':
+    source?'Pass the phone to Person '+(conversationSpeaker+1)+'.':'No speech captured. Try this turn again.';
+  renderConversationControls();
+}
+
+async function endConversationTurn(end=false){
+  if(conversationPhase==='ready'&&end){
+    conversationPhase='idle';statusEl.textContent='Conversation ended. You can play or download it.';renderConversationControls();return;
+  }
+  if(conversationPhase!=='listening')return;
+  conversationEnding=end;
+  conversationPhase='stopping';
+  renderConversationControls();
+  await stopListening(false);
+  if(conversationPhase!=='stopping')return;
+  conversationPhase='finishing';
+  finishConversationTurn();
 }
 
 const flagRegions = {'en-US':'gb','ca-ES':'es-ct','cy-GB':'gb-wls','gd-GB':'gb-sct'};
@@ -395,13 +520,18 @@ function renderLanguageFlag(element, code){
 }
 
 function updateLanguageButtons(){
-  const a=language(input.value),b=language(output.value);
+  const inConversation=audioSourceMode==='conversation';
+  document.getElementById('languageRow').classList.toggle('conversationPair',inConversation);
+  const [a,b]=(inConversation?conversationLanguages:[input.value,output.value]).map(language);
+  document.getElementById('inputRole').textContent=inConversation?'PERSON 1':'FROM';
+  document.getElementById('outputRole').textContent=inConversation?'PERSON 2':'TO';
   renderLanguageFlag(document.getElementById('inputFlag'),a.code);
   renderLanguageFlag(document.getElementById('outputFlag'),b.code);
   document.getElementById('inputName').textContent=a.name;
   document.getElementById('outputName').textContent=b.name;
   const swap=document.getElementById('swap');
-  swap.disabled=input.value==='auto';
+  swap.hidden=inConversation;
+  swap.disabled=inConversation||input.value==='auto';
   swap.title=input.value==='auto'?'Choose an input language to swap':'Swap languages';
   showDetectedLanguage(detectedInputLanguage);
 }
@@ -421,7 +551,7 @@ function renderLanguagePicker(query=''){
   const host=document.getElementById('languageResults');
   const q=query.trim().toLowerCase();
   host.innerHTML='';
-  const available=pickerTarget==='input'?[AUTO_LANGUAGE,...LANGUAGES]:LANGUAGES;
+  const available=pickerTarget==='input'&&audioSourceMode!=='conversation'?[AUTO_LANGUAGE,...LANGUAGES]:LANGUAGES;
   const filtered=available.filter(l=>!q||l.name.toLowerCase().includes(q)||l.region.toLowerCase().includes(q));
   const sections=[];
   const automatic=filtered.filter(l=>l.code==='auto');
@@ -461,6 +591,13 @@ function renderLanguagePicker(query=''){
 }
 
 async function selectLanguage(code){
+  if(audioSourceMode==='conversation'){
+    if(conversationPhase!=='idle'||code==='auto')return;
+    conversationLanguages[pickerTarget==='input'?0:1]=code;
+    noteUse(code);updateLanguageButtons();renderConversationControls();closeSheet('languageSheet');
+    statusEl.textContent=conversationLanguages[0]===conversationLanguages[1]?'Choose a different language for each person.':'Choose both languages, then start.';
+    return;
+  }
   if(code==='auto'&&pickerTarget!=='input')return;
   showDetectedLanguage(null);
   const resumeListening=wantsListening&&pickerTarget==='input';
@@ -472,8 +609,9 @@ async function selectLanguage(code){
 }
 
 function launchLanguagePicker(target){
+  if(audioSourceMode==='conversation'&&conversationPhase!=='idle')return;
   pickerTarget=target;
-  document.getElementById('sheetTitle').textContent=target==='input'?'Choose input language':'Choose translation language';
+  document.getElementById('sheetTitle').textContent=audioSourceMode==='conversation'?'Choose Person '+(target==='input'?1:2)+'’s language':target==='input'?'Choose input language':'Choose translation language';
   const search=document.getElementById('languageSearch');search.value='';renderLanguagePicker();openSheet('languageSheet');setTimeout(()=>search.focus(),150);
 }
 document.getElementById('inputPicker').onclick=()=>launchLanguagePicker('input');
@@ -510,6 +648,7 @@ const finalTranslations=new OrderedTranslationQueue({
     pendingTranslations=count;
     const el=document.getElementById('queueState');
     if(el)el.textContent=count>2?'Catching up · '+count+' phrases':count?'Translating…':'';
+    if(!count)finishConversationTurn();
   },
   onCommit:({job,result,error})=>{
     translatedInterim='';
@@ -519,14 +658,14 @@ const finalTranslations=new OrderedTranslationQueue({
       translationFailures=true;
       translatedCommitted=normalizeSpaces(translatedCommitted+' ⟦Translation unavailable⟧');
       translationState.textContent='Some speech needs retrying';
-      document.getElementById('retryTranslation').hidden=false;
+      document.getElementById('retryTranslation').hidden=audioSourceMode==='conversation';
     }else{
       translatedCommitted=normalizeSpaces(translatedCommitted+' '+result.translation);
       if(job.sourceLanguage==='auto'&&job.sourceLanguageVersion===sourceLanguageVersion&&result.detectedLanguage){
         showDetectedLanguage(result.detectedLanguage);
       }
       translationState.textContent=(result.needsReview?'Check unclear phrase · ':'Live · ')+result.endToEndMs+'ms';
-      if(liveVoiceEnabled&&job.voiceGeneration===liveVoiceGeneration)speakText(result.translation);
+      if(audioSourceMode!=='conversation'&&liveVoiceEnabled&&job.voiceGeneration===liveVoiceGeneration)speakText(result.translation,{lang:job.targetLanguage});
     }
     showTranslatedText();
   }
@@ -589,7 +728,7 @@ function queueFinalTranslation(phrase,{speak=true}={}){
     recentSourcePhrases=[...recentSourcePhrases,chunk].slice(-3);
   }
 }
-document.getElementById('retryTranslation').onclick=()=>resetTranslationPipeline(true);
+document.getElementById('retryTranslation').onclick=()=>{if(audioSourceMode!=='conversation')resetTranslationPipeline(true)};
 
 function clearMp3Download(){
   if(mp3Controller)mp3Controller.abort();
@@ -814,7 +953,7 @@ function scheduleReconnect(){
 
 async function startListening(isReconnect=false){
   if(isListening||!wantsListening)return;
-  if(audioSourceMode==='mic'&&!navigator.mediaDevices?.getUserMedia){wantsListening=false;statusEl.textContent='Microphone capture is not supported in this browser.';return}
+  if(audioSourceMode!=='meeting'&&!navigator.mediaDevices?.getUserMedia){wantsListening=false;statusEl.textContent='Microphone capture is not supported in this browser.';return}
   if(audioSourceMode==='meeting'&&!navigator.mediaDevices?.getDisplayMedia){wantsListening=false;statusEl.textContent='Meeting audio works in supported desktop browsers such as Chrome and Edge.';return}
   if(!navigator.onLine){setDiagnostic('network','error','Device is offline');scheduleReconnect();return}
   setDiagnostic('network','ok');
@@ -830,6 +969,7 @@ async function startListening(isReconnect=false){
     clearTimeout(sessionLimitTimer);
     sessionLimitTimer=setTimeout(async()=>{
       if(!wantsListening)return;
+      if(audioSourceMode==='conversation'){await endConversationTurn();return}
       await stopListening(true);
       statusEl.textContent='30-minute session finished. Tap the microphone to start a new session.';
     },MAX_SESSION_MS);
@@ -979,21 +1119,28 @@ async function stopListening(updateUi=true){
   }
 }
 
-mic.onclick=async()=>{
-  if(wantsListening){await stopListening(true);return}
-  if(liveVoiceEnabled){primeNaturalVoice();primeSpeechSynthesis()}
+async function beginListening(){
   wantsListening=true;
   usingBrowserFallback=false;
   preferWhisper=false;
   reconnectAttempts=0;
   resetDiagnostics();
   await startListening(false);
+}
+mic.onclick=async()=>{
+  if(wantsListening){await stopListening(true);return}
+  if(liveVoiceEnabled){primeNaturalVoice();primeSpeechSynthesis()}
+  await beginListening();
 };
+conversationAction.onclick=()=>conversationPhase==='listening'?endConversationTurn():startConversationTurn();
+conversationEnd.onclick=()=>endConversationTurn(true);
 document.getElementById('swap').onclick=async()=>{const resumeListening=wantsListening;if(resumeListening)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);resetTranslationPipeline(true);if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}};
-document.getElementById('clear').onclick=()=>{clearMp3Download();speechSegments.clear();committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';cancelVoice();resetTranslationPipeline();clearTimeout(liveVoicePauseTimer);if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript();setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
+document.getElementById('clear').onclick=()=>{if(audioSourceMode==='conversation'&&['stopping','finishing'].includes(conversationPhase))return;if(audioSourceMode==='conversation'){conversationHistory.replaceChildren();conversationLastPlayback=null;conversationTurnOffset=0;}clearMp3Download();speechSegments.clear();committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';cancelVoice();resetTranslationPipeline();clearTimeout(liveVoicePauseTimer);if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript();setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
 copyBtn.onclick=async()=>{if(translationEl.classList.contains('placeholder'))return;try{await navigator.clipboard.writeText(translationEl.textContent);statusEl.textContent='Translation copied'}catch{statusEl.textContent='Copy failed'}};
 speakBtn.onclick=()=>{
+  if(audioSourceMode==='conversation'&&['listening','stopping','finishing'].includes(conversationPhase)){speakStatus.textContent='Finish the speaking turn before playing audio.';return}
   if(retryVoicePlayback){retryVoicePlayback.play();return}
+  if(audioSourceMode==='conversation'&&conversationLastPlayback){speakText(conversationLastPlayback.text,{replace:true,lang:conversationLastPlayback.lang});return}
   if(translationEl.classList.contains('placeholder')){speakStatus.textContent='Start a translation to play it here.';return}
   speakText(translationEl.textContent,{replace:true});
 };
@@ -1047,6 +1194,7 @@ if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serv
 
 if(micSourceBtn)micSourceBtn.onclick=()=>setAudioSource('mic');
 if(meetingSourceBtn)meetingSourceBtn.onclick=()=>setAudioSource('meeting');
+conversationSourceBtn.onclick=()=>setAudioSource('conversation');
 applyTheme(store.get('vt-theme','calm'));
 updateLanguageButtons();
 renderAudioSource();

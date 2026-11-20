@@ -37,10 +37,20 @@
     .installLink{min-width:52px;height:52px;border:1px solid var(--line);border-radius:17px;background:var(--surface);color:var(--text);display:grid;place-items:center;text-decoration:none;font-size:20px;box-shadow:0 8px 20px var(--shadow)}.themeBtn{min-width:52px;height:52px;border:1px solid var(--line);border-radius:17px;background:var(--surface);color:var(--text);font-size:22px;box-shadow:0 8px 20px var(--shadow)}
     .card{background:var(--hero);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:0 18px 46px var(--shadow)}
     .languageRow{display:grid;grid-template-columns:1fr 58px 1fr;gap:10px;align-items:center}
+    .languageRow.conversationPair{grid-template-columns:repeat(2,minmax(0,1fr))}
     .langBtn{min-height:74px;text-align:left;border:1px solid var(--line);border-radius:18px;background:var(--surface);color:var(--text);padding:11px 13px;display:flex;align-items:center;gap:10px}
     .flag{font-size:25px;line-height:1}.langMeta{min-width:0}.langLabel{font-size:.68rem;color:var(--muted);font-weight:800;letter-spacing:.06em}.langName{margin-top:3px;font-size:1rem;font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .swap{width:58px;height:58px;border:0;border-radius:18px;background:var(--surface2);color:var(--accent);font-size:25px;font-weight:900}
-    .sourceMode{display:flex;gap:8px;justify-content:center;margin:20px auto -6px;max-width:420px}.sourceBtn{flex:1;min-height:44px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--muted);font-weight:850}.sourceBtn.active{background:var(--accent);border-color:var(--accent);color:var(--accentText)}.sourceHint{max-width:440px;margin:9px auto 0;color:var(--muted);font-size:.72rem;line-height:1.4;text-align:center}
+    .sourceMode{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:20px auto -6px;max-width:420px}.sourceBtn{flex:1 0 96px;min-height:44px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--muted);font-weight:850}.sourceBtn.active{background:var(--accent);border-color:var(--accent);color:var(--accentText)}.sourceHint{max-width:440px;margin:9px auto 0;color:var(--muted);font-size:.72rem;line-height:1.4;text-align:center}
+    .conversationControls{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+    .conversationControls[hidden],.conversationHistory[hidden]{display:none}
+    .conversationControls .btn{padding:0 14px;flex:1}
+    .conversationHistory{display:grid;gap:9px;margin:0;padding:0;list-style:none}
+    .conversationHistory:empty{display:none}
+    .conversationTurn{padding:12px;border:1px solid var(--line);border-radius:16px;background:var(--surface)}
+    .conversationTurn[data-person="2"]{background:var(--surface2)}
+    .conversationTurn p{margin:6px 0;overflow-wrap:anywhere}
+    .conversationTurn button{min-height:44px;padding:0 12px}
     .micWrap{text-align:center;padding:24px 0 26px}
     .mic{width:132px;height:132px;border-radius:50%;border:0;background:var(--accent);color:var(--accentText);font-size:48px;box-shadow:0 18px 42px var(--micShadow);transition:.2s}
     .mic:active{transform:scale(.96)}
@@ -106,17 +116,21 @@
     </div>
 
     <section class="card">
-      <div class="languageRow">
-        <button class="langBtn" id="inputPicker"><span class="flag" id="inputFlag" aria-hidden="true">🌐</span><span class="langMeta"><span class="langLabel">FROM</span><span class="langName" id="inputName">Auto-detect</span></span></button>
+      <div class="languageRow" id="languageRow">
+        <button class="langBtn" id="inputPicker"><span class="flag" id="inputFlag" aria-hidden="true">🌐</span><span class="langMeta"><span class="langLabel" id="inputRole">FROM</span><span class="langName" id="inputName">Auto-detect</span></span></button>
         <button class="swap" id="swap" aria-label="Swap languages">⇄</button>
-        <button class="langBtn" id="outputPicker"><span class="flag" id="outputFlag" data-flag="fr" aria-hidden="true"></span><span class="langMeta"><span class="langLabel">TO</span><span class="langName" id="outputName">French</span></span></button>
+        <button class="langBtn" id="outputPicker"><span class="flag" id="outputFlag" data-flag="fr" aria-hidden="true"></span><span class="langMeta"><span class="langLabel" id="outputRole">TO</span><span class="langName" id="outputName">French</span></span></button>
       </div>
       <input type="hidden" id="inputLang" value="auto" />
       <input type="hidden" id="outputLang" value="fr-FR" />
       <div class="sourceHint" id="detectedLanguage" role="status" aria-live="polite">Language will be detected as you speak</div>
 
-      <div class="sourceMode"><button class="sourceBtn active" id="micSourceBtn" type="button">🎤 Microphone</button><button class="sourceBtn" id="meetingSourceBtn" type="button">🖥️ Meeting audio</button></div>
+      <div class="sourceMode"><button class="sourceBtn active" id="micSourceBtn" type="button">🎤 Microphone</button><button class="sourceBtn" id="meetingSourceBtn" type="button">🖥️ Meeting audio</button><button class="sourceBtn" id="conversationSourceBtn" type="button">💬 Conversation</button></div>
       <div class="sourceHint" id="sourceHint">Microphone mode listens to your voice.</div>
+      <div class="conversationControls" id="conversationControls" hidden>
+        <button class="btn primary" id="conversationAction" type="button">Start conversation</button>
+        <button class="btn" id="conversationEnd" type="button" hidden>End conversation</button>
+      </div>
       <details class="settings"><summary>Conversation settings</summary>
         <label>Translation <select id="translationQuality"><option value="accurate">High accuracy</option><option value="fast">Faster responses</option></select></label>
         <label>Voice <select id="voiceQuality"><option value="natural">Natural voice · online</option><option value="device">Device voice · faster</option></select></label>
@@ -124,11 +138,12 @@
         <p>High accuracy uses more processing. Nearby speaker reduces automatic microphone gain; keep your phone close to the person you want to hear. Overlapping voices can still be mixed.</p>
       </details>
       <div class="micWrap">
-        <button class="mic" id="mic" aria-label="Start listening" aria-pressed="false">🎤</button>
+        <button class="mic" id="mic" type="button" aria-label="Start listening" aria-pressed="false">🎤</button>
         <div class="status" id="status" role="status" aria-live="polite">Tap the microphone and start speaking</div>
         <div class="engine" id="engineBadge">Ready to listen</div><div class="diagnostic" id="diagnostic"><div class="diagTitle">Speech diagnostics</div><div id="diagnosticBody">Waiting for microphone test.</div></div>
       </div>
 
+      <ol class="conversationHistory" id="conversationHistory" aria-label="Conversation turns" hidden></ol>
       <div class="sourceHint" id="queueState" role="status" aria-live="polite"></div>
       <button class="btn" id="retryTranslation" type="button" hidden>Retry translation</button>
       <div class="panel"><div class="sectionTitle"><span>Live transcription</span><span class="smallStatus" id="speechState"></span></div><div class="textBox placeholder" id="transcript">Your speech will appear here.</div></div>
