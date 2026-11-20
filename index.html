@@ -11,6 +11,7 @@
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/icon.svg" />
   <title>VoiceTranslator.eu — Live Voice Translation</title>
+  <link rel="stylesheet" href="/language-flags.css">
   <style>
     :root{
       font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
@@ -106,9 +107,9 @@
 
     <section class="card">
       <div class="languageRow">
-        <button class="langBtn" id="inputPicker"><span class="flag" id="inputFlag">🌐</span><span class="langMeta"><span class="langLabel">FROM</span><span class="langName" id="inputName">Auto-detect</span></span></button>
+        <button class="langBtn" id="inputPicker"><span class="flag" id="inputFlag" aria-hidden="true">🌐</span><span class="langMeta"><span class="langLabel">FROM</span><span class="langName" id="inputName">Auto-detect</span></span></button>
         <button class="swap" id="swap" aria-label="Swap languages">⇄</button>
-        <button class="langBtn" id="outputPicker"><span class="flag" id="outputFlag">🇫🇷</span><span class="langMeta"><span class="langLabel">TO</span><span class="langName" id="outputName">French</span></span></button>
+        <button class="langBtn" id="outputPicker"><span class="flag" id="outputFlag" data-flag="fr" aria-hidden="true"></span><span class="langMeta"><span class="langLabel">TO</span><span class="langName" id="outputName">French</span></span></button>
       </div>
       <input type="hidden" id="inputLang" value="auto" />
       <input type="hidden" id="outputLang" value="fr-FR" />

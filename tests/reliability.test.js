@@ -20,6 +20,22 @@ function app(extra={}){
   vm.runInContext(frontend,context);return {context,document,run:code=>vm.runInContext(code,context)};
 }
 
+test('language picker and selected languages use bundled country flags',()=>{
+  const {document,run}=app();
+  const css=readFileSync(new URL('../public/language-flags.css',import.meta.url),'utf8');
+  assert.equal(document.getElementById('outputFlag').dataset.flag,'gb');
+  run("pickerTarget='output';renderLanguagePicker('Welsh')");
+  const row=document.getElementById('languageResults').children[1].children[0];
+  assert.equal(row.children[0].dataset.flag,'gb-wls');
+  assert.equal(row.children[1].textContent,'Welsh');
+  run("input.value='auto';updateLanguageButtons()");
+  assert.equal(document.getElementById('inputFlag').dataset.flag,undefined);
+  assert.equal(document.getElementById('inputFlag').textContent,'🌐');
+  for(const flag of run("LANGUAGES.map(({code})=>{const element=document.createElement('span');renderLanguageFlag(element,code);return element.dataset.flag})")){
+    assert.ok(css.includes(`[data-flag="${flag}"]`),`Missing artwork for ${flag}`);
+  }
+});
+
 test('JSON response body remains abortable after headers arrive',async()=>{
   const caller=new AbortController();let signal;
   const request=requestTranslation({}, {signal:caller.signal,fetchImpl:async(_,options)=>{

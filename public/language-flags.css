@@ -1,0 +1,67 @@
+/* Country artwork from flag-icons 7.6.0. See LICENSE.flag-icons. */
+.flag[data-flag] {
+  width: 28px;
+  height: 21px;
+  flex: none;
+  background-image: url("/language-flags.png");
+  background-repeat: no-repeat;
+  background-size: 800% 700%;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.flag[data-flag="ae"] { background-position: 0.000000% 0.000000%; }
+.flag[data-flag="al"] { background-position: 14.285714% 0.000000%; }
+.flag[data-flag="am"] { background-position: 28.571429% 0.000000%; }
+.flag[data-flag="ba"] { background-position: 42.857143% 0.000000%; }
+.flag[data-flag="bg"] { background-position: 57.142857% 0.000000%; }
+.flag[data-flag="by"] { background-position: 71.428571% 0.000000%; }
+.flag[data-flag="ch"] { background-position: 85.714286% 0.000000%; }
+.flag[data-flag="cn"] { background-position: 100.000000% 0.000000%; }
+.flag[data-flag="cz"] { background-position: 0.000000% 16.666667%; }
+.flag[data-flag="de"] { background-position: 14.285714% 16.666667%; }
+.flag[data-flag="dk"] { background-position: 28.571429% 16.666667%; }
+.flag[data-flag="ee"] { background-position: 42.857143% 16.666667%; }
+.flag[data-flag="eg"] { background-position: 57.142857% 16.666667%; }
+.flag[data-flag="es"] { background-position: 71.428571% 16.666667%; }
+.flag[data-flag="es-ct"] { background-position: 85.714286% 16.666667%; }
+.flag[data-flag="fi"] { background-position: 100.000000% 16.666667%; }
+.flag[data-flag="fo"] { background-position: 0.000000% 33.333333%; }
+.flag[data-flag="fr"] { background-position: 14.285714% 33.333333%; }
+.flag[data-flag="gb"] { background-position: 28.571429% 33.333333%; }
+.flag[data-flag="gb-sct"] { background-position: 42.857143% 33.333333%; }
+.flag[data-flag="gb-wls"] { background-position: 57.142857% 33.333333%; }
+.flag[data-flag="ge"] { background-position: 71.428571% 33.333333%; }
+.flag[data-flag="gr"] { background-position: 85.714286% 33.333333%; }
+.flag[data-flag="hk"] { background-position: 100.000000% 33.333333%; }
+.flag[data-flag="hr"] { background-position: 0.000000% 50.000000%; }
+.flag[data-flag="hu"] { background-position: 14.285714% 50.000000%; }
+.flag[data-flag="ie"] { background-position: 28.571429% 50.000000%; }
+.flag[data-flag="il"] { background-position: 42.857143% 50.000000%; }
+.flag[data-flag="in"] { background-position: 57.142857% 50.000000%; }
+.flag[data-flag="ir"] { background-position: 71.428571% 50.000000%; }
+.flag[data-flag="is"] { background-position: 85.714286% 50.000000%; }
+.flag[data-flag="it"] { background-position: 100.000000% 50.000000%; }
+.flag[data-flag="jp"] { background-position: 0.000000% 66.666667%; }
+.flag[data-flag="kr"] { background-position: 14.285714% 66.666667%; }
+.flag[data-flag="lt"] { background-position: 28.571429% 66.666667%; }
+.flag[data-flag="lu"] { background-position: 42.857143% 66.666667%; }
+.flag[data-flag="lv"] { background-position: 57.142857% 66.666667%; }
+.flag[data-flag="ma"] { background-position: 71.428571% 66.666667%; }
+.flag[data-flag="mk"] { background-position: 85.714286% 66.666667%; }
+.flag[data-flag="mt"] { background-position: 100.000000% 66.666667%; }
+.flag[data-flag="nl"] { background-position: 0.000000% 83.333333%; }
+.flag[data-flag="no"] { background-position: 14.285714% 83.333333%; }
+.flag[data-flag="ph"] { background-position: 28.571429% 83.333333%; }
+.flag[data-flag="pl"] { background-position: 42.857143% 83.333333%; }
+.flag[data-flag="pt"] { background-position: 57.142857% 83.333333%; }
+.flag[data-flag="ro"] { background-position: 71.428571% 83.333333%; }
+.flag[data-flag="rs"] { background-position: 85.714286% 83.333333%; }
+.flag[data-flag="ru"] { background-position: 100.000000% 83.333333%; }
+.flag[data-flag="sa"] { background-position: 0.000000% 100.000000%; }
+.flag[data-flag="se"] { background-position: 14.285714% 100.000000%; }
+.flag[data-flag="si"] { background-position: 28.571429% 100.000000%; }
+.flag[data-flag="sk"] { background-position: 42.857143% 100.000000%; }
+.flag[data-flag="tr"] { background-position: 57.142857% 100.000000%; }
+.flag[data-flag="tw"] { background-position: 71.428571% 100.000000%; }
+.flag[data-flag="ua"] { background-position: 85.714286% 100.000000%; }

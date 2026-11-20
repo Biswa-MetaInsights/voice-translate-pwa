@@ -9,74 +9,74 @@ import { LIVE_TRANSCRIBE_MODEL, WHISPER_MODEL, speechProviderOptions } from '../
 import { guessSourceLanguage } from './source-language.js';
 
 const LANGUAGES = [
-  {code:'en-US',name:'English',flag:'🇬🇧',region:'Western Europe'},
-  {code:'fr-FR',name:'French',flag:'🇫🇷',region:'Western Europe'},
-  {code:'nl-NL',name:'Dutch',flag:'🇳🇱',region:'Western Europe'},
-  {code:'de-DE',name:'German',flag:'🇩🇪',region:'Western Europe'},
-  {code:'lb-LU',name:'Luxembourgish',flag:'🇱🇺',region:'Western Europe'},
-  {code:'ga-IE',name:'Irish',flag:'🇮🇪',region:'Western Europe'},
-  {code:'da-DK',name:'Danish',flag:'🇩🇰',region:'Northern Europe'},
-  {code:'sv-SE',name:'Swedish',flag:'🇸🇪',region:'Northern Europe'},
-  {code:'no-NO',name:'Norwegian',flag:'🇳🇴',region:'Northern Europe'},
-  {code:'fi-FI',name:'Finnish',flag:'🇫🇮',region:'Northern Europe'},
-  {code:'is-IS',name:'Icelandic',flag:'🇮🇸',region:'Northern Europe'},
-  {code:'et-EE',name:'Estonian',flag:'🇪🇪',region:'Northern Europe'},
-  {code:'lv-LV',name:'Latvian',flag:'🇱🇻',region:'Northern Europe'},
-  {code:'lt-LT',name:'Lithuanian',flag:'🇱🇹',region:'Northern Europe'},
-  {code:'pl-PL',name:'Polish',flag:'🇵🇱',region:'Central Europe'},
-  {code:'cs-CZ',name:'Czech',flag:'🇨🇿',region:'Central Europe'},
-  {code:'sk-SK',name:'Slovak',flag:'🇸🇰',region:'Central Europe'},
-  {code:'hu-HU',name:'Hungarian',flag:'🇭🇺',region:'Central Europe'},
-  {code:'ro-RO',name:'Romanian',flag:'🇷🇴',region:'Central Europe'},
-  {code:'rm-CH',name:'Romansh',flag:'🇨🇭',region:'Central Europe'},
-  {code:'it-IT',name:'Italian',flag:'🇮🇹',region:'Southern Europe'},
-  {code:'es-ES',name:'Spanish',flag:'🇪🇸',region:'Southern Europe'},
-  {code:'pt-PT',name:'Portuguese',flag:'🇵🇹',region:'Southern Europe'},
-  {code:'el-GR',name:'Greek',flag:'🇬🇷',region:'Southern Europe'},
-  {code:'mt-MT',name:'Maltese',flag:'🇲🇹',region:'Southern Europe'},
-  {code:'ca-ES',name:'Catalan',flag:'🏴',region:'Southern Europe'},
-  {code:'bg-BG',name:'Bulgarian',flag:'🇧🇬',region:'Eastern Europe & Balkans'},
-  {code:'hr-HR',name:'Croatian',flag:'🇭🇷',region:'Eastern Europe & Balkans'},
-  {code:'sl-SI',name:'Slovenian',flag:'🇸🇮',region:'Eastern Europe & Balkans'},
-  {code:'sr-RS',name:'Serbian',flag:'🇷🇸',region:'Eastern Europe & Balkans'},
-  {code:'bs-BA',name:'Bosnian',flag:'🇧🇦',region:'Eastern Europe & Balkans'},
-  {code:'sq-AL',name:'Albanian',flag:'🇦🇱',region:'Eastern Europe & Balkans'},
-  {code:'mk-MK',name:'Macedonian',flag:'🇲🇰',region:'Eastern Europe & Balkans'},
-  {code:'uk-UA',name:'Ukrainian',flag:'🇺🇦',region:'Eastern Europe & Balkans'},
-  {code:'ru-RU',name:'Russian',flag:'🇷🇺',region:'Eastern Europe & Balkans'},
-  {code:'tr-TR',name:'Turkish',flag:'🇹🇷',region:'Middle East & Asia'},
-  {code:'eu-ES',name:'Basque',flag:'🇪🇸',region:'Regional European Languages'},
-  {code:'gl-ES',name:'Galician',flag:'🇪🇸',region:'Regional European Languages'},
-  {code:'cy-GB',name:'Welsh',flag:'🏴',region:'Regional European Languages'},
-  {code:'gd-GB',name:'Scottish Gaelic',flag:'🏴',region:'Regional European Languages'},
-  {code:'br-FR',name:'Breton',flag:'🇫🇷',region:'Regional European Languages'},
-  {code:'oc-FR',name:'Occitan',flag:'🇫🇷',region:'Regional European Languages'},
-  {code:'co-FR',name:'Corsican',flag:'🇫🇷',region:'Regional European Languages'},
-  {code:'fy-NL',name:'Western Frisian',flag:'🇳🇱',region:'Regional European Languages'},
-  {code:'fo-FO',name:'Faroese',flag:'🇫🇴',region:'Regional European Languages'},
-  {code:'se-NO',name:'Northern Sami',flag:'🇳🇴',region:'Regional European Languages'},
-  {code:'be-BY',name:'Belarusian',flag:'🇧🇾',region:'Eastern Europe & Balkans'},
-  {code:'hy-AM',name:'Armenian',flag:'🇦🇲',region:'Eastern Europe & Balkans'},
-  {code:'ka-GE',name:'Georgian',flag:'🇬🇪',region:'Eastern Europe & Balkans'},
-  {code:'he-IL',name:'Hebrew',flag:'🇮🇱',region:'Middle East & Asia'},
-  {code:'fa-IR',name:'Persian (Farsi)',flag:'🇮🇷',region:'Middle East & Asia'},
-  {code:'ar-SA',name:'Arabic (Standard)',flag:'🇸🇦',region:'Middle East & Asia'},
-  {code:'ar-EG',name:'Arabic (Egyptian)',flag:'🇪🇬',region:'Middle East & Asia'},
-  {code:'ar-MA',name:'Arabic (Moroccan)',flag:'🇲🇦',region:'Middle East & Asia'},
-  {code:'ar-AE',name:'Arabic (Gulf)',flag:'🇦🇪',region:'Middle East & Asia'},
-  {code:'zh-CN',name:'Chinese (Mandarin, Simplified)',flag:'🇨🇳',region:'East Asia'},
-  {code:'zh-TW',name:'Chinese (Traditional)',flag:'🇹🇼',region:'East Asia'},
-  {code:'yue-HK',name:'Cantonese',flag:'🇭🇰',region:'East Asia'},
-  {code:'ja-JP',name:'Japanese',flag:'🇯🇵',region:'East Asia'},
-  {code:'ko-KR',name:'Korean',flag:'🇰🇷',region:'East Asia'},
-  {code:'hi-IN',name:'Hindi',flag:'🇮🇳',region:'South Asia'},
-  {code:'ml-IN',name:'Malayalam',flag:'🇮🇳',region:'South Asia'},
-  {code:'ta-IN',name:'Tamil',flag:'🇮🇳',region:'South Asia'},
-  {code:'te-IN',name:'Telugu',flag:'🇮🇳',region:'South Asia'},
-  {code:'kn-IN',name:'Kannada',flag:'🇮🇳',region:'South Asia'},
-  {code:'fil-PH',name:'Filipino (Tagalog)',flag:'🇵🇭',region:'Southeast Asia'}
+  {code:'en-US',name:'English',region:'Western Europe'},
+  {code:'fr-FR',name:'French',region:'Western Europe'},
+  {code:'nl-NL',name:'Dutch',region:'Western Europe'},
+  {code:'de-DE',name:'German',region:'Western Europe'},
+  {code:'lb-LU',name:'Luxembourgish',region:'Western Europe'},
+  {code:'ga-IE',name:'Irish',region:'Western Europe'},
+  {code:'da-DK',name:'Danish',region:'Northern Europe'},
+  {code:'sv-SE',name:'Swedish',region:'Northern Europe'},
+  {code:'no-NO',name:'Norwegian',region:'Northern Europe'},
+  {code:'fi-FI',name:'Finnish',region:'Northern Europe'},
+  {code:'is-IS',name:'Icelandic',region:'Northern Europe'},
+  {code:'et-EE',name:'Estonian',region:'Northern Europe'},
+  {code:'lv-LV',name:'Latvian',region:'Northern Europe'},
+  {code:'lt-LT',name:'Lithuanian',region:'Northern Europe'},
+  {code:'pl-PL',name:'Polish',region:'Central Europe'},
+  {code:'cs-CZ',name:'Czech',region:'Central Europe'},
+  {code:'sk-SK',name:'Slovak',region:'Central Europe'},
+  {code:'hu-HU',name:'Hungarian',region:'Central Europe'},
+  {code:'ro-RO',name:'Romanian',region:'Central Europe'},
+  {code:'rm-CH',name:'Romansh',region:'Central Europe'},
+  {code:'it-IT',name:'Italian',region:'Southern Europe'},
+  {code:'es-ES',name:'Spanish',region:'Southern Europe'},
+  {code:'pt-PT',name:'Portuguese',region:'Southern Europe'},
+  {code:'el-GR',name:'Greek',region:'Southern Europe'},
+  {code:'mt-MT',name:'Maltese',region:'Southern Europe'},
+  {code:'ca-ES',name:'Catalan',region:'Southern Europe'},
+  {code:'bg-BG',name:'Bulgarian',region:'Eastern Europe & Balkans'},
+  {code:'hr-HR',name:'Croatian',region:'Eastern Europe & Balkans'},
+  {code:'sl-SI',name:'Slovenian',region:'Eastern Europe & Balkans'},
+  {code:'sr-RS',name:'Serbian',region:'Eastern Europe & Balkans'},
+  {code:'bs-BA',name:'Bosnian',region:'Eastern Europe & Balkans'},
+  {code:'sq-AL',name:'Albanian',region:'Eastern Europe & Balkans'},
+  {code:'mk-MK',name:'Macedonian',region:'Eastern Europe & Balkans'},
+  {code:'uk-UA',name:'Ukrainian',region:'Eastern Europe & Balkans'},
+  {code:'ru-RU',name:'Russian',region:'Eastern Europe & Balkans'},
+  {code:'tr-TR',name:'Turkish',region:'Middle East & Asia'},
+  {code:'eu-ES',name:'Basque',region:'Regional European Languages'},
+  {code:'gl-ES',name:'Galician',region:'Regional European Languages'},
+  {code:'cy-GB',name:'Welsh',region:'Regional European Languages'},
+  {code:'gd-GB',name:'Scottish Gaelic',region:'Regional European Languages'},
+  {code:'br-FR',name:'Breton',region:'Regional European Languages'},
+  {code:'oc-FR',name:'Occitan',region:'Regional European Languages'},
+  {code:'co-FR',name:'Corsican',region:'Regional European Languages'},
+  {code:'fy-NL',name:'Western Frisian',region:'Regional European Languages'},
+  {code:'fo-FO',name:'Faroese',region:'Regional European Languages'},
+  {code:'se-NO',name:'Northern Sami',region:'Regional European Languages'},
+  {code:'be-BY',name:'Belarusian',region:'Eastern Europe & Balkans'},
+  {code:'hy-AM',name:'Armenian',region:'Eastern Europe & Balkans'},
+  {code:'ka-GE',name:'Georgian',region:'Eastern Europe & Balkans'},
+  {code:'he-IL',name:'Hebrew',region:'Middle East & Asia'},
+  {code:'fa-IR',name:'Persian (Farsi)',region:'Middle East & Asia'},
+  {code:'ar-SA',name:'Arabic (Standard)',region:'Middle East & Asia'},
+  {code:'ar-EG',name:'Arabic (Egyptian)',region:'Middle East & Asia'},
+  {code:'ar-MA',name:'Arabic (Moroccan)',region:'Middle East & Asia'},
+  {code:'ar-AE',name:'Arabic (Gulf)',region:'Middle East & Asia'},
+  {code:'zh-CN',name:'Chinese (Mandarin, Simplified)',region:'East Asia'},
+  {code:'zh-TW',name:'Chinese (Traditional)',region:'East Asia'},
+  {code:'yue-HK',name:'Cantonese',region:'East Asia'},
+  {code:'ja-JP',name:'Japanese',region:'East Asia'},
+  {code:'ko-KR',name:'Korean',region:'East Asia'},
+  {code:'hi-IN',name:'Hindi',region:'South Asia'},
+  {code:'ml-IN',name:'Malayalam',region:'South Asia'},
+  {code:'ta-IN',name:'Tamil',region:'South Asia'},
+  {code:'te-IN',name:'Telugu',region:'South Asia'},
+  {code:'kn-IN',name:'Kannada',region:'South Asia'},
+  {code:'fil-PH',name:'Filipino (Tagalog)',region:'Southeast Asia'}
 ];
-const AUTO_LANGUAGE={code:'auto',name:'Auto-detect',flag:'🌐',region:'Automatic'};
+const AUTO_LANGUAGE={code:'auto',name:'Auto-detect',region:'Automatic'};
 let detectedInputLanguage=null;
 let sourceLanguageSample='',sourceLanguageVersion=0;
 
@@ -382,10 +382,24 @@ function renderAudioSource(){
     : 'Microphone mode listens to your voice.';
 }
 
+const flagRegions = {'en-US':'gb','ca-ES':'es-ct','cy-GB':'gb-wls','gd-GB':'gb-sct'};
+
+function renderLanguageFlag(element, code){
+  if(code==='auto'){
+    delete element.dataset.flag;
+    element.textContent='🌐';
+    return;
+  }
+  element.dataset.flag=flagRegions[code]||code.split('-')[1].toLowerCase();
+  element.textContent='';
+}
+
 function updateLanguageButtons(){
   const a=language(input.value),b=language(output.value);
-  document.getElementById('inputFlag').textContent=a.flag;document.getElementById('inputName').textContent=a.name;
-  document.getElementById('outputFlag').textContent=b.flag;document.getElementById('outputName').textContent=b.name;
+  renderLanguageFlag(document.getElementById('inputFlag'),a.code);
+  renderLanguageFlag(document.getElementById('outputFlag'),b.code);
+  document.getElementById('inputName').textContent=a.name;
+  document.getElementById('outputName').textContent=b.name;
   const swap=document.getElementById('swap');
   swap.disabled=input.value==='auto';
   swap.title=input.value==='auto'?'Choose an input language to swap':'Swap languages';
@@ -431,7 +445,9 @@ function renderLanguagePicker(query=''){
     const list=document.createElement('div');list.className='langList';
     unique.forEach(l=>{
       const row=document.createElement('div');row.className='langItem';
-      const flag=document.createElement('div');flag.className='flag';flag.textContent=l.flag;
+      const flag=document.createElement('span');flag.className='flag';
+      flag.setAttribute('aria-hidden','true');
+      renderLanguageFlag(flag,l.code);
       const choose=document.createElement('button');choose.className='langItemMain';choose.textContent=l.name;
       choose.onclick=()=>selectLanguage(l.code);
       const star=document.createElement('button');star.className='starBtn'+(favorites.includes(l.code)?' active':'');star.textContent=favorites.includes(l.code)?'★':'☆';star.setAttribute('aria-label','Favorite '+l.name);
