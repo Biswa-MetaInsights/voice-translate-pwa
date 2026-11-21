@@ -1,13 +1,13 @@
 // A bounded worker pool prevents one slow phrase blocking all later requests.
 // Results are committed in speaking order; pending phrases can be coalesced.
 export class OrderedTranslationQueue {
-  constructor({run,onProgress=()=>{},onCommit=()=>{},onPending=()=>{},concurrency=2}) {
-    Object.assign(this,{run,onProgress,onCommit,onPending,concurrency});
+  constructor({run,onProgress=()=>{},onCommit=()=>{},onPending=()=>{},concurrency=2,coalesce=true}) {
+    Object.assign(this,{run,onProgress,onCommit,onPending,concurrency,coalesce});
     this.pending=[];this.active=new Map();this.finished=new Map();this.nextId=0;this.nextCommit=0;this.generation=0;
   }
   push(job) {
     const tail=this.pending.at(-1);
-    if(tail&&tail.sourceLanguage===job.sourceLanguage&&tail.targetLanguage===job.targetLanguage&&tail.quality===job.quality&&tail.voiceGeneration===job.voiceGeneration&&tail.text.length+job.text.length+1<=2800){
+    if(this.coalesce&&tail&&tail.sourceLanguage===job.sourceLanguage&&tail.targetLanguage===job.targetLanguage&&tail.quality===job.quality&&tail.voiceGeneration===job.voiceGeneration&&tail.text.length+job.text.length+1<=2800){
       tail.text+=' '+job.text;
     }else this.pending.push({...job,id:this.nextId++});
     this.pump();

@@ -10,7 +10,9 @@ import {LIVE_TRANSCRIBE_MODEL,WHISPER_MODEL,speechProviderOptions} from '../lib/
 import {createPcmBuffer} from '../src/pcm-buffer.js';
 import {guessSourceLanguage} from '../src/source-language.js';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-const frontend=readFileSync(new URL('../src/main.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
+const twoPerson=readFileSync(new URL('../src/two-person-conversation.js',import.meta.url),'utf8')
+  .replace(/^import .*;\n/gm,'').replace('export function','function');
+const frontend=twoPerson+readFileSync(new URL('../src/main.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
 function app(extra={}){
   const document=createDocument();
   document.getElementById('inputLang').value='fr-FR';document.getElementById('outputLang').value='en-US';
@@ -358,4 +360,289 @@ test('Clear cancels an export and removes its conversation snapshot from the scr
   assert.equal(signal.aborted,true);assert.equal(document.getElementById('downloadMp3').disabled,true);
   assert.equal(document.getElementById('mp3Save').hidden,true);
   assert.equal(document.getElementById('translation').textContent,'Your translation will appear here.');
+});
+
+async function openTwoPersonMode(appFixture) {
+  const {document: doc} = appFixture;
+  await doc.getElementById('conversationSourceBtn').onclick();
+  doc.getElementById('beginConversation').onclick();
+}
+
+function visibleTurns(doc) {
+  return [...doc.getElementById('turnHistory').children, ...doc.getElementById('latestTurn').children];
+}
+
+test('two people keep fixed languages, finish recognition, and hear each completed turn in the opposite language', async () => {
+  const instances = [];
+  const requests = [];
+  const voice = [];
+  let stop;
+  class Recognition {
+    constructor() { instances.push(this); }
+    start() {}
+    stop() { stop = this; }
+  }
+  const {run, document: doc, context} = app({
+    window: {addEventListener(){}, SpeechRecognition: Recognition},
+    requestTranslation: async job => {
+      requests.push(job);
+      return {translation: job.targetLanguage === 'ar-AE' ? 'الموعد يوم الثلاثاء' : 'Please bring your ID.'};
+    }
+  });
+  context.voice = voice;
+  run(`startListening=async()=>{startBrowserFallback()}; speakText=(text,options)=>voice.push([text,options.lang]);
+       committedTranscript='Existing microphone transcript'; document.getElementById('conversationAutoplay').checked=true`);
+  await openTwoPersonMode({document: doc});
+  const first = doc.getElementById('personOneTurn');
+  const second = doc.getElementById('personTwoTurn');
+  assert.equal(doc.getElementById('singleTranslationPanels').hidden, true);
+  first.onclick();
+  assert.equal(instances[0].lang, 'en-US');
+  assert.equal(second.disabled, true);
+  first.onclick();
+  assert.equal(stop, instances[0]);
+  assert.equal(first.disabled && second.disabled, true);
+  stop.onresult({resultIndex:0, results:[Object.assign([{transcript:'The appointment is on Tuesday.'}], {isFinal:true})]});
+  stop.onend();
+  await tick();
+  assert.equal(visibleTurns(doc).length, 1);
+  assert.match(visibleTurns(doc)[0].textContent, /الموعد.*Tuesday/);
+  assert.equal(second.disabled, false);
+  assert.equal(doc.activeElement, second);
+
+  second.onclick();
+  assert.equal(instances[1].lang, 'ar-AE');
+  second.onclick();
+  stop.onresult({resultIndex:0, results:[Object.assign([{transcript:'أحضر بطاقة الهوية'}], {isFinal:true})]});
+  stop.onend();
+  await tick();
+  assert.deepEqual(requests.map(job => [job.sourceLanguage, job.targetLanguage, job.quality]), [
+    ['en-US', 'ar-AE', 'accurate'], ['ar-AE', 'en-US', 'accurate']
+  ]);
+  assert.equal(requests[1].context[0], 'الموعد يوم الثلاثاء');
+  assert.deepEqual(voice.map(([message, lang]) => [message, lang]), [
+    ['الموعد يوم الثلاثاء', 'ar-AE'], ['Please bring your ID.', 'en-US']
+  ]);
+  assert.equal(visibleTurns(doc).length, 2);
+  assert.match(visibleTurns(doc)[0].textContent, /الموعد.*Tuesday/);
+  assert.match(visibleTurns(doc)[1].textContent, /Please bring your ID.*الهوية/);
+  await doc.getElementById('micSourceBtn').onclick();
+  assert.equal(doc.getElementById('singleTranslationPanels').hidden, false);
+  assert.equal(run('committedTranscript'), 'Existing microphone transcript');
+  assert.equal(doc.getElementById('inputLang').value, 'fr-FR');
+  assert.equal(doc.getElementById('outputLang').value, 'en-US');
+});
+
+test('a slow turn blocks handoff through playback and a retry updates only the failed message', async () => {
+  let resolveFirst, finishPlayback;
+  let shouldFail = true;
+  const voice = [];
+  const {run, document: doc, context} = app({
+    requestTranslation: job => {
+      if (job.text === 'First') return new Promise(resolve => { resolveFirst = resolve; });
+      if (shouldFail) throw new Error('Service unavailable');
+      return Promise.resolve({translation:'Second translated', needsReview:true});
+    }
+  });
+  context.voice = voice;
+  context.playback = new Promise(resolve => { finishPlayback = resolve; });
+  run(`startListening=async()=>{}; speakText=(text,options)=>{
+    voice.push([text,options.lang]);options.feedback.onPlaying();liveVoiceQueue=playback;return true;
+  };
+       document.getElementById('conversationAutoplay').checked=true`);
+  await openTwoPersonMode({document: doc});
+  doc.getElementById('personOneTurn').onclick();
+  run("commitCapturedSpeech('First')");
+  await run('conversation.finish()');
+  const other = doc.getElementById('personTwoTurn');
+  const status = doc.getElementById('status');
+  assert.equal(other.disabled, true);
+  assert.equal(status.textContent, 'Translating…');
+  other.onclick();
+  assert.equal(visibleTurns(doc).length, 1);
+  resolveFirst({translation:'First translated'});
+  await tick();
+  assert.equal(other.disabled, true);
+  assert.match(status.textContent, /Playing translation/);
+  assert.equal(voice.length, 1);
+  assert.equal(doc.getElementById('skipConversationAudio').hidden, false);
+  doc.getElementById('skipConversationAudio').onclick();
+  assert.equal(other.disabled, false);
+  other.onclick();
+  finishPlayback();
+  await tick();
+  assert.equal(other.disabled, false);
+  run("commitCapturedSpeech('Second')");
+  await run('conversation.finish()');
+  await tick();
+  const [first, second] = visibleTurns(doc);
+  assert.match(second.textContent, /could not be translated/);
+  shouldFail = false;
+  const retry = second.children.find(element => element.textContent === 'Retry translation');
+  retry.onclick();
+  await tick();
+  assert.match(first.textContent, /First translated/);
+  assert.match(second.textContent, /Second translated.*speech was unclear/);
+  assert.equal(retry.hidden, true);
+  assert.equal(voice.length, 1);
+  doc.getElementById('endConversation').onclick();
+  assert.equal(status.textContent, 'Conversation ended.');
+  assert.equal(visibleTurns(doc).length, 2);
+  assert.equal(doc.getElementById('downloadMp3').disabled, false);
+  assert.equal(doc.getElementById('latestTurn').children[0], second);
+  doc.getElementById('newConversation').onclick();
+  assert.equal(doc.getElementById('confirmNewConversation').hidden, false);
+  assert.equal(visibleTurns(doc).length, 2);
+  doc.getElementById('keepConversation').onclick();
+  assert.equal(visibleTurns(doc).length, 2);
+  doc.getElementById('newConversation').onclick();
+  doc.getElementById('startOverConversation').onclick();
+  assert.equal(visibleTurns(doc).length, 0);
+  assert.equal(doc.getElementById('conversationSetup').hidden, false);
+});
+
+test('continuing through a delayed translation preserves the result without late audio', async () => {
+  let translateFirst;
+  const voice = [];
+  const {run, document: doc, context} = app({
+    requestTranslation: ({text}) => text === 'First'
+      ? new Promise(resolve => { translateFirst = resolve; })
+      : Promise.resolve({translation: 'Second translated'})
+  });
+  context.voice = voice;
+  run(`startListening=async()=>{statusEl.textContent='Listening'}; speakText=text=>voice.push(text);
+       document.getElementById('conversationAutoplay').checked=true`);
+  await openTwoPersonMode({document: doc});
+  const first = doc.getElementById('personOneTurn');
+  const second = doc.getElementById('personTwoTurn');
+  const proceed = doc.getElementById('continueConversation');
+  first.onclick();
+  run("commitCapturedSpeech('First')");
+  await run('conversation.finish()');
+  assert.equal(second.disabled, true);
+  assert.equal(proceed.hidden, false);
+  proceed.onclick();
+  assert.equal(proceed.hidden, true);
+  assert.equal(second.disabled, false);
+  second.onclick();
+  translateFirst({translation: 'First translated'});
+  await tick();
+  assert.equal(doc.getElementById('status').textContent, 'Listening');
+  assert.equal(voice.length, 0);
+  assert.match(visibleTurns(doc)[0].textContent, /First translated/);
+  run("commitCapturedSpeech('Second')");
+  await run('conversation.finish()');
+  await tick();
+  assert.deepEqual(voice, ['Second translated']);
+});
+
+test('two-person setup blocks duplicate languages and an unavailable microphone unlocks both speakers', async () => {
+  const {document: doc} = app();
+  await doc.getElementById('conversationSourceBtn').onclick();
+  const secondLanguage = doc.getElementById('personTwoLanguage');
+  const start = doc.getElementById('beginConversation');
+  secondLanguage.value = 'en-US';
+  secondLanguage.onchange();
+  assert.equal(start.disabled, true);
+  secondLanguage.value = 'ar-AE';
+  secondLanguage.onchange();
+  start.onclick();
+  const first = doc.getElementById('personOneTurn');
+  first.onclick();
+  assert.match(doc.getElementById('status').textContent, /not supported/);
+  assert.equal(visibleTurns(doc).length, 0);
+  assert.equal(first.disabled, false);
+  assert.equal(doc.getElementById('personTwoTurn').disabled, false);
+});
+
+test('finishing capture sends every queued frame then EOF while refusing later audio', async () => {
+  const capture = createPcmBuffer(() => assert.fail('Buffer did not overflow'));
+  const reader = capture.open().getReader();
+  const first = new Uint8Array([1]);
+  const second = new Uint8Array([2]);
+  capture.push(first);
+  capture.push(second);
+  capture.finish();
+  capture.push(new Uint8Array([3]));
+  assert.deepEqual(await reader.read(), {value:first, done:false});
+  assert.deepEqual(await reader.read(), {value:second, done:false});
+  assert.deepEqual(await reader.read(), {value:undefined, done:true});
+});
+
+test('finishing an empty microphone stream releases a waiting reader', async () => {
+  const capture = createPcmBuffer(() => {});
+  const reader = capture.open().getReader();
+  const pending = reader.read();
+  await tick();
+  capture.finish();
+  assert.deepEqual(await pending, {value:undefined, done:true});
+});
+
+test('conversation drains captured PCM through realtime transcription and keeps the final words', async () => {
+  let processor, pcmBytes = 0, stopped = 0, hint;
+  const track = {readyState:'live', addEventListener(){}, stop(){ this.readyState='ended'; stopped++; }};
+  const stream = {getTracks:()=>[track], getAudioTracks:()=>[track]};
+  const node = () => ({connect(){}, disconnect(){}});
+  class AudioContext {
+    sampleRate = 24000;
+    state = 'running';
+    destination = {};
+    createMediaStreamSource() { return node(); }
+    createScriptProcessor() { return processor = node(); }
+    createGain() { return {...node(), gain:{value:1}}; }
+    async close() {}
+  }
+  const translated = [];
+  const fixture = app({
+    navigator:{onLine:true, mediaDevices:{getUserMedia:async()=>stream}},
+    window:{addEventListener(){}, AudioContext},
+    createGateway:()=>({transcriptionModel:()=>({})}),
+    fetch:async()=>({ok:true, json:async()=>({token:'mock', model:WHISPER_MODEL})}),
+    streamTranscribe:({audio, providerOptions}) => ({
+      async *fullStream() {
+        hint = providerOptions.openai.language;
+        const reader = audio.getReader();
+        let seenAudio = false;
+        try {
+          for (;;) {
+            const {value,done} = await reader.read();
+            if (done) break;
+            pcmBytes += value.byteLength;
+            if (!seenAudio) {
+              seenAudio = true;
+              yield {type:'transcript-partial', id:'message', text:'الموعد الساعة'};
+            }
+          }
+          yield {type:'transcript-final', id:'message', text:'الموعد الساعة ٩:١٥'};
+        } finally {
+          reader.releaseLock();
+        }
+      }
+    }),
+    requestTranslation: async payload => {
+      if (payload.quality === 'fast') return {translation:'The appointment is at'};
+      translated.push(payload);
+      return {translation:'The appointment is at 9:15.'};
+    }
+  });
+  // Expose the same async iterable shape the transcriber returns.
+  const transcribe = fixture.context.streamTranscribe;
+  fixture.context.streamTranscribe = params => ({fullStream:transcribe(params).fullStream()});
+  await openTwoPersonMode(fixture);
+  const {document: doc} = fixture;
+  const speaker = doc.getElementById('personTwoTurn');
+  speaker.onclick();
+  await tick();
+  processor.onaudioprocess({inputBuffer:{getChannelData:()=>new Float32Array(480).fill(0.1)}});
+  await tick();
+  assert.match(visibleTurns(doc).map(turn => turn.textContent).join(' '), /الموعد الساعة/);
+  speaker.onclick();
+  await tick();
+  assert.equal(hint, 'ar');
+  assert.equal(pcmBytes, 960);
+  assert.ok(stopped > 0);
+  assert.equal(translated[0].text, 'الموعد الساعة ٩:١٥');
+  assert.equal(translated[0].targetLanguage, 'en-US');
+  assert.match(visibleTurns(doc).map(turn => turn.textContent).join(' '), /The appointment is at 9:15/);
+  assert.equal(speaker.disabled, false);
 });

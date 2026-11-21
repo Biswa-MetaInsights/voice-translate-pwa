@@ -117,3 +117,48 @@ test('first translated words reach the client while the provider is still produc
   const {lines}=await handling;
   assert.equal(lines.at(-1).result.translation,'Hello, world');
 });
+
+test('conversation summary sends ordered multilingual turns and bounds invalid requests and output', async () => {
+  const source = readFileSync(new URL('../api/conversation-summary.js', import.meta.url), 'utf8')
+    .replace(/^import .*;\n/gm, '').replace('export default async function handler', 'async function handler');
+  const calls = [];
+  let points = [' Bring an ID on Tuesday at 10:00. '];
+  const sandbox = vm.createContext({
+    process: { env: { AI_GATEWAY_API_KEY: 'summary-test' } },
+    console: { error() {} },
+    AbortController, AbortSignal,
+    jsonSchema: schema => schema,
+    Output: { object: ({schema}) => schema },
+    createGateway: () => model => model,
+    generateText: async request => { calls.push(request); return { output: { points } }; }
+  });
+  vm.runInContext(source, sandbox);
+  async function post(body) {
+    const res = {
+      headers: {},
+      setHeader(name, value) { this.headers[name] = value; },
+      status(code) { this.statusCode = code; return this; },
+      json(value) { this.body = value; return this; }
+    };
+    await sandbox.handler({ method: 'POST', headers: {}, body }, res);
+    return res;
+  }
+
+  const turns = [
+    { speaker: 1, language: 'en-US', text: 'Is Tuesday at 10:00 confirmed?' },
+    { speaker: 2, language: 'ar-AE', text: 'إيه، وياريت تجيب الهوية.' }
+  ];
+  assert.equal((await post({ language: 'en-US', turns: [] })).statusCode, 400);
+  assert.equal((await post({ language: 'en-US', turns: [{ ...turns[0], text: 'x'.repeat(120_001) }] })).statusCode, 413);
+  assert.equal(calls.length, 0);
+
+  const result = await post({ language: 'en-US', turns });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.headers['Cache-Control'], 'no-store');
+  assert.equal(result.body.points[0], 'Bring an ID on Tuesday at 10:00.');
+  assert.deepEqual(JSON.parse(calls[0].prompt), {
+    language: 'en-US', transcript: turns.map(turn => ({ ...turn, unclear: false }))
+  });
+  points = [''];
+  assert.equal((await post({ language: 'en-US', turns })).statusCode, 502);
+});

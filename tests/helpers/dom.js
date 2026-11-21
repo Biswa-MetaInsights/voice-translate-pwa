@@ -7,8 +7,24 @@ export function createDocument(){
     const classes=new Set();
     return {ownerDocument:document,value:'',children:[],dataset:{},
       classList:{toggle(name,on){if(on)classes.add(name);else classes.delete(name)},add(name){classes.add(name)},remove(name){classes.delete(name)},contains(name){return classes.has(name)}},
-      append(...items){this.children.push(...items)},appendChild(item){this.children.push(item);return item},
-      replaceChildren(...items){this.children=items},
+      append(...items){for(const item of items)this.appendChild(item)},
+      appendChild(item){return this.insertBefore(item,null)},
+      insertBefore(item,before){
+        item.parentElement?.removeChild(item);
+        const index=before?this.children.indexOf(before):-1;
+        this.children.splice(index<0?this.children.length:index,0,item);
+        item.parentElement=this;
+        return item;
+      },
+      replaceChildren(...items){
+        for(const child of [...this.children])this.removeChild(child);
+        this.append(...items);
+      },
+      removeChild(item){
+        this.children=this.children.filter(child=>child!==item);
+        if(item.parentElement===this)item.parentElement=null;
+      },
+      focus(){document.activeElement=this},
       get textContent(){return this.children.map(x=>x.textContent).join('')},
       set textContent(value){this.replaceChildren(document.createTextNode(value))},
       setAttribute(){},removeAttribute(){},addEventListener(){},
