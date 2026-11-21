@@ -39,6 +39,23 @@
     .flag{font-size:25px;line-height:1}.langMeta{min-width:0}.langLabel{font-size:.68rem;color:var(--muted);font-weight:800;letter-spacing:.06em}.langName{margin-top:3px;font-size:1rem;font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .swap{width:58px;height:58px;border:0;border-radius:18px;background:var(--surface2);color:var(--accent);font-size:25px;font-weight:900}
     .sourceMode{display:flex;gap:8px;justify-content:center;margin:20px auto -6px;max-width:420px}.sourceBtn{flex:1;min-height:44px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--muted);font-weight:850}.sourceBtn.active{background:var(--accent);border-color:var(--accent);color:var(--accentText)}.sourceHint{max-width:440px;margin:9px auto 0;color:var(--muted);font-size:.72rem;line-height:1.4;text-align:center}
+    [hidden]{display:none!important}
+    .conversationGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .conversationGrid label{display:grid;gap:6px;min-width:0;font-weight:750}
+    .conversationGrid select,.turnButton{width:100%;min-height:48px;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);font:inherit}
+    .turnButton{min-height:64px;font-weight:800;overflow-wrap:anywhere}
+    .turnButton[aria-pressed="true"]{background:var(--accent);color:var(--accentText)}
+    .conversationOptions{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-top:14px}
+    .conversationOptions label{display:flex;align-items:center;gap:8px;min-height:44px}
+    .conversationOptions input{width:20px;height:20px;accent-color:var(--accent)}
+    .turnHistory{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+    .turn{padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+    .turn h3,.turn p{margin:0 0 7px;overflow-wrap:anywhere}
+    .turn h3,.turnNote{font-size:.85rem;color:var(--muted)}
+    .turnTranslation{font-weight:750}
+    .turnDraft{color:var(--muted)}
+    .turn .btn{min-height:44px;margin:2px 6px 0 0}
+    @media(max-width:380px){.sourceBtn{font-size:.8rem;padding-inline:4px}}
     .micWrap{text-align:center;padding:24px 0 26px}
     .mic{width:132px;height:132px;border-radius:50%;border:0;background:var(--accent);color:var(--accentText);font-size:48px;box-shadow:0 18px 42px var(--micShadow);transition:.2s}
     .mic:active{transform:scale(.96)}
@@ -104,7 +121,7 @@
     </div>
 
     <section class="card">
-      <div class="languageRow">
+      <div class="languageRow" id="singleLanguageRow">
         <button class="langBtn" id="inputPicker"><span class="flag" id="inputFlag">🌐</span><span class="langMeta"><span class="langLabel">FROM</span><span class="langName" id="inputName">Auto-detect</span></span></button>
         <button class="swap" id="swap" aria-label="Swap languages">⇄</button>
         <button class="langBtn" id="outputPicker"><span class="flag" id="outputFlag">🇫🇷</span><span class="langMeta"><span class="langLabel">TO</span><span class="langName" id="outputName">French</span></span></button>
@@ -113,25 +130,49 @@
       <input type="hidden" id="outputLang" value="fr-FR" />
       <div class="sourceHint" id="detectedLanguage" role="status" aria-live="polite">Language will be detected as you speak</div>
 
-      <div class="sourceMode"><button class="sourceBtn active" id="micSourceBtn" type="button">🎤 Microphone</button><button class="sourceBtn" id="meetingSourceBtn" type="button">🖥️ Meeting audio</button></div>
+      <div class="sourceMode"><button class="sourceBtn active" id="micSourceBtn" type="button">🎤 Microphone</button><button class="sourceBtn" id="meetingSourceBtn" type="button">🖥️ Meeting audio</button><button class="sourceBtn" id="conversationSourceBtn" type="button">Conversation</button></div>
       <div class="sourceHint" id="sourceHint">Microphone mode listens to your voice.</div>
       <details class="settings"><summary>Conversation settings</summary>
-        <label>Translation <select id="translationQuality"><option value="accurate">High accuracy</option><option value="fast">Faster responses</option></select></label>
+        <label id="singleTranslationQuality">Translation <select id="translationQuality"><option value="accurate">High accuracy</option><option value="fast">Faster responses</option></select></label>
         <label>Voice <select id="voiceQuality"><option value="natural">Natural voice · online</option><option value="device">Device voice · faster</option></select></label>
         <label>Microphone <select id="audioProfile"><option value="standard">Standard</option><option value="nearby">Nearby speaker</option></select></label>
         <p>High accuracy uses more processing. Nearby speaker reduces automatic microphone gain; keep your phone close to the person you want to hear. Overlapping voices can still be mixed.</p>
       </details>
+      <section id="twoPersonConversation" aria-label="Two-person conversation" hidden>
+        <div class="panel" id="conversationSetup">
+          <div class="conversationGrid">
+            <label>Person 1 language <select id="personOneLanguage"></select></label>
+            <label>Person 2 language <select id="personTwoLanguage"></select></label>
+          </div>
+          <div class="conversationOptions"><button class="btn primary" id="beginConversation" type="button">Start conversation</button></div>
+        </div>
+        <div class="panel" id="conversationControls" hidden>
+          <div class="conversationGrid">
+            <button class="turnButton" id="personOneTurn" type="button" aria-pressed="false">Person 1</button>
+            <button class="turnButton" id="personTwoTurn" type="button" aria-pressed="false">Person 2</button>
+          </div>
+          <div class="conversationOptions">
+            <label><input id="conversationAutoplay" type="checkbox" checked> Play translated turns aloud</label>
+            <button class="btn" id="endConversation" type="button">End conversation</button>
+          </div>
+        </div>
+      </section>
       <div class="micWrap">
         <button class="mic" id="mic" aria-label="Start listening" aria-pressed="false">🎤</button>
         <div class="status" id="status" role="status" aria-live="polite">Tap the microphone and start speaking</div>
         <div class="engine" id="engineBadge">Ready to listen</div><div class="diagnostic" id="diagnostic"><div class="diagTitle">Speech diagnostics</div><div id="diagnosticBody">Waiting for microphone test.</div></div>
       </div>
 
+      <section id="conversationHistory" aria-label="Conversation history" hidden>
+        <ol class="turnHistory" id="turnHistory"></ol>
+      </section>
+      <div id="singleTranslationPanels">
       <div class="sourceHint" id="queueState" role="status" aria-live="polite"></div>
       <button class="btn" id="retryTranslation" type="button" hidden>Retry translation</button>
       <div class="panel"><div class="sectionTitle"><span>Live transcription</span><span class="smallStatus" id="speechState"></span></div><div class="textBox placeholder" id="transcript">Your speech will appear here.</div></div>
       <div class="panel"><div class="sectionTitle"><span>Live translation</span><span class="smallStatus" id="translationState"></span></div><div class="textBox placeholder" id="translation">Your translation will appear here.</div><div class="liveVoiceRow"><div class="liveVoiceCopy"><span style="font-size:22px">🔊</span><div><strong>Live translated voice <span class="liveVoiceState" id="liveVoiceState">Off</span></strong><small>Automatically speak each completed translated phrase</small></div></div><label class="switch" aria-label="Live translated voice"><input type="checkbox" id="liveVoiceToggle"><span class="slider"></span></label></div><div class="actions"><button class="btn" id="copy">Copy</button><button class="btn primary" id="speak">🔊 Speak</button><button class="btn" id="downloadMp3" disabled>↓ Download MP3</button><button class="btn" id="clear">Clear</button></div></div>
       <div class="sourceHint mp3Export"><label for="mp3Content">MP3 content</label> <select id="mp3Content"><option value="both">Original + translation</option><option value="translation">Translation only</option></select><p>Generated voices read your completed conversation text. This is not a recording of the speakers.</p><div id="mp3Status" role="status" aria-live="polite"></div><button class="btn" id="cancelMp3" hidden>Cancel download</button> <a id="mp3Save" hidden>Save conversation MP3</a></div>
+      </div>
     </section>
     <section class="infoCard mobileNotice" aria-labelledby="mobileAppTitle"><span class="noticeIcon" aria-hidden="true">📱</span><div><h2 id="mobileAppTitle">A dedicated mobile app is under construction</h2><p>While we build it, you can add VoiceTranslator.eu to your phone’s home screen and use it like an app. No App Store or Play Store download is needed.</p></div></section>
     <section class="infoCard" aria-labelledby="installTitle"><h2 id="installTitle">Add VoiceTranslator to your phone</h2><div class="installSteps"><div><strong>iPhone or iPad</strong><p>Open this page in <b>Safari</b>. Tap <b>Share</b> → <b>Add to Home Screen</b> → <b>Add</b>.</p></div><div><strong>Android</strong><p>Open this page in <b>Chrome</b>. Tap <b>⋮</b> → <b>Install app</b> or <b>Add to Home screen</b>.</p></div></div><a class="installMore" href="/install.html">See the full installation guide →</a></section>
