@@ -1,3 +1,4 @@
+import {setupTwoPersonConversation} from '../src/two-person-conversation.js';
 import {assertTranslationLanguage} from '../lib/translation-language.js';
 import {createLiveText} from '../src/live-text.js';
 import {createDocument} from './helpers/dom.js';
@@ -53,7 +54,7 @@ test('auto is rejected as a target and same-language labels still translate actu
 test('input picker, per-phrase detection, and history retry do not replay old speech',async()=>{
   const document=createDocument();
   document.getElementById('inputLang').value='auto';document.getElementById('outputLang').value='en-US';
-  const context=vm.createContext({document,navigator:{onLine:true,mediaDevices:{}},window:{addEventListener(){}},
+  const context=vm.createContext({document,setupTwoPersonConversation,navigator:{onLine:true,mediaDevices:{}},window:{addEventListener(){}},
     localStorage:{getItem(){return null},setItem(){}},setTimeout,clearTimeout,console,AbortController,
     createLiveText,OrderedTranslationQueue,requestTranslation:async()=>({translation:'Hello',detectedLanguage:'en-US'}),splitPhrases,shouldRecover,speechProviderOptions,guessSourceLanguage,performance});
   const frontend=readFileSync(new URL('../src/main.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');

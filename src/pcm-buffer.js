@@ -8,6 +8,7 @@ export function createPcmBuffer(onOverflow, maxBytes = MAX_BUFFER_BYTES) {
   let receiver;
   let waiting = false;
   let reportedOverflow = false;
+  let finished = false;
 
   function readFrame() {
     const frame = frames.shift();
@@ -24,6 +25,7 @@ export function createPcmBuffer(onOverflow, maxBytes = MAX_BUFFER_BYTES) {
 
   return {
     push(frame) {
+      if (finished) return;
       if (waiting) {
         waiting = false;
         receiver.enqueue(frame);
@@ -45,6 +47,7 @@ export function createPcmBuffer(onOverflow, maxBytes = MAX_BUFFER_BYTES) {
         start(controller) { owner = receiver = controller; },
         pull(controller) {
           if (frames.length) controller.enqueue(readFrame());
+          else if (finished) disconnect();
           else waiting = true;
         },
         cancel() {
@@ -54,6 +57,10 @@ export function createPcmBuffer(onOverflow, maxBytes = MAX_BUFFER_BYTES) {
           }
         },
       }, { highWaterMark: 0 });
+    },
+    finish() {
+      finished = true;
+      if (waiting) disconnect();
     },
     disconnect,
   };

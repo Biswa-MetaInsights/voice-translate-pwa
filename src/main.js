@@ -7,6 +7,7 @@ import { shouldRecover } from './audio-health.js';
 import { createPcmBuffer } from './pcm-buffer.js';
 import { LIVE_TRANSCRIBE_MODEL, WHISPER_MODEL, speechProviderOptions } from '../lib/speech-models.js';
 import { guessSourceLanguage } from './source-language.js';
+import { setupTwoPersonConversation } from './two-person-conversation.js';
 
 const LANGUAGES = [
   {code:'en-US',name:'English',flag:'🇬🇧',region:'Western Europe'},
@@ -106,6 +107,7 @@ const liveVoiceToggle=document.getElementById('liveVoiceToggle');
 const liveVoiceState=document.getElementById('liveVoiceState');
 const micSourceBtn=document.getElementById('micSourceBtn');
 const meetingSourceBtn=document.getElementById('meetingSourceBtn');
+const conversationSourceBtn=document.getElementById('conversationSourceBtn');
 const sourceHint=document.getElementById('sourceHint');
 
 let isListening=false, committedTranscript='', interimTranscript='';
@@ -128,22 +130,81 @@ let speechRecoveryRunning=false;
 let preferWhisper=false;
 let previewText='';
 const speechSegments=new Map();
+let turnDrain=null, switchingAudioSource=false;
+const conversation=setupTwoPersonConversation({
+  document,languages:LANGUAGES,status:statusEl,capture:beginListening,finishCapture:finishConversationCapture,
+  play:(text,lang,replace)=>speakText(text,{lang,replace}),stopVoice:cancelVoice,
+  setCaptureActive:active=>{
+    micSourceBtn.disabled=active;
+    meetingSourceBtn.disabled=active||!navigator.mediaDevices?.getDisplayMedia;
+  }
+});
+
+function activeSpeechLanguage(){
+  return conversation.sourceLanguage||input.value;
+}
+
+function commitCapturedSpeech(text){
+  if(conversation.sourceLanguage)conversation.addSpeech(text);
+  else{
+    committedTranscript=normalizeSpaces(committedTranscript+' '+text);
+    queueFinalTranslation(text);
+  }
+}
+
+function failConversationCapture(){
+  if(conversation.sourceLanguage&&!conversation.isFinishing){
+    const warning=statusEl.textContent;
+    clearTimeout(sessionLimitTimer);
+    stopBrowserFallback();
+    preserveInterimSpeech();
+    conversation.completeTurn(warning);
+  }
+}
+
+async function finishConversationCapture(){
+  const session=transcriptionSession;
+  let incomplete=Boolean(interimTranscript&&!usingBrowserFallback&&!speechController);
+  if(usingBrowserFallback||microphoneBuffer&&speechController){
+    let timer;
+    const drained=new Promise(resolve=>{
+      turnDrain={session,resolve};
+      timer=setTimeout(()=>resolve(false),3500);
+    });
+    clearTimeout(reconnectTimer);
+    clearInterval(healthTimer);
+    if(usingBrowserFallback){
+      try{browserRecognition.stop()}catch{turnDrain.resolve(false)}
+    }else{
+      // Stop recording immediately, but let queued audio and the final recognition event drain.
+      mediaStream?.getTracks().forEach(track=>track.stop());
+      microphoneBuffer.finish();
+    }
+    incomplete=!(await drained);
+    clearTimeout(timer);
+    turnDrain=null;
+  }
+  const warning=diagnosticState.audioGap?'Some microphone audio was lost. Check the captured text.'
+    : incomplete?'Speech did not finish processing. Check the captured text.':'';
+  await stopListening(false);
+  return warning;
+}
 
 function preserveInterimSpeech(){
   const tail=normalizeSpaces(interimTranscript);
   if(tail){
-    committedTranscript=normalizeSpaces(committedTranscript+' '+tail);
+    commitCapturedSpeech(tail);
     interimTranscript='';
-    queueFinalTranslation(tail);
     setTranscript();
   }
   speechSegments.clear();
 }
 
 async function recoverSpeech(restartCapture=false){
-  if(speechRecoveryRunning||!wantsListening||usingBrowserFallback)return;
+  if(speechRecoveryRunning||!wantsListening||usingBrowserFallback||conversation.isFinishing)return;
   speechRecoveryRunning=true;
   ++transcriptionSession;
+  if(conversation.sourceLanguage&&voiceMs)diagnosticState.audioGap=true;
   preserveInterimSpeech();
   setDiagnostic('realtime','error','Speech stalled; restoring the connection');
   const recoverySession=transcriptionSession;
@@ -221,7 +282,10 @@ function detectSourceWhileSpeaking(text){
   }
 }
 function normalizeSpaces(v){return v.replace(/\s+/g,' ').trim()}
-function setTranscript(){renderTranscript(committedTranscript,interimTranscript,/^(ar|he|fa|ur)(-|$)/.test(input.value)?'rtl':'auto')}
+function setTranscript(){
+  if(conversation.sourceLanguage)conversation.setDraft(interimTranscript);
+  else renderTranscript(committedTranscript,interimTranscript,/^(ar|he|fa|ur)(-|$)/.test(input.value)?'rtl':'auto');
+}
 function setTranslation(text='',draft=''){renderTranslation(text,draft,/^(ar|he|fa|ur)(-|$)/.test(output.value)?'rtl':'auto')}
 function currentTranscript(){return normalizeSpaces(committedTranscript+' '+interimTranscript)}
 
@@ -261,10 +325,10 @@ function deviceSpeak(text,lang){
     speechSynthesis.resume();speechSynthesis.speak(utterance);
   });
 }
-function speakText(text,{replace=false}={}){
+function speakText(text,{replace=false,lang=output.value}={}){
   const clean=normalizeSpaces(text||'');if(!clean)return false;
   if(replace){cancelVoice();primeNaturalVoice()}
-  const generation=liveVoiceGeneration,lang=output.value;
+  const generation=liveVoiceGeneration;
   const natural=document.getElementById('voiceQuality').value!=='device';
   const chunks=splitPhrases(clean);
   queuedVoiceCount+=chunks.length;
@@ -291,7 +355,8 @@ function speakText(text,{replace=false}={}){
       if(generation!==liveVoiceGeneration)return;
       if(error?.name==='NotAllowedError'){
         liveVoiceEnabled=false;renderLiveVoice();
-        statusEl.textContent='Tap Speak to allow translated voice playback on this device';return;
+        statusEl.textContent=audioSourceMode==='conversation'?'Tap Play translation to allow audio on this device.'
+          :'Tap Speak to allow translated voice playback on this device';return;
       }
       statusEl.textContent='Natural voice unavailable — using a matching device voice when available';
       await deviceSpeak(chunk,lang);
@@ -324,28 +389,52 @@ function renderLiveVoice(){
 // Translated voice now reuses finalized phrase translations from the main pipeline.
 // No secondary translation call or one-second speech delay is necessary.
 
-async function setAudioSource(mode){
-  const next=mode==='meeting'?'meeting':'mic';
-  if(next===audioSourceMode)return;
-  const resume=wantsListening;
-  if(resume)await stopListening(false);
-  audioSourceMode=next;
-  store.set('vt-audio-source',audioSourceMode);
-  renderAudioSource();
-  if(resume){
-    wantsListening=true;
-    reconnectAttempts=0;
-    await startListening(false);
+async function setAudioSource(next){
+  if(next===audioSourceMode||switchingAudioSource||conversation.sourceLanguage)return;
+  switchingAudioSource=true;
+  try{
+    const previous=audioSourceMode;
+    const resume=wantsListening&&next!=='conversation';
+    if(wantsListening||isListening)await stopListening(false);
+    if(previous==='conversation')conversation.close();
+    if(next==='conversation'){
+      cancelVoice();
+      resetDiagnostics();
+      conversation.validatePair();
+    }else if(previous==='conversation'){
+      statusEl.textContent='Tap the microphone and start speaking';
+      resetDiagnostics();
+    }
+    audioSourceMode=next;
+    if(next!=='conversation')store.set('vt-audio-source',audioSourceMode);
+    renderAudioSource();
+    if(resume){
+      wantsListening=true;
+      reconnectAttempts=0;
+      void startListening(false);
+    }
+  }finally{
+    switchingAudioSource=false;
   }
 }
 
 function renderAudioSource(){
   if(!micSourceBtn||!meetingSourceBtn||!sourceHint)return;
-  micSourceBtn.classList.toggle('active',audioSourceMode==='mic');
-  meetingSourceBtn.classList.toggle('active',audioSourceMode==='meeting');
-  sourceHint.textContent=audioSourceMode==='meeting'
-    ? 'Meeting audio captures sound from a shared tab/screen. When prompted, share the meeting and enable audio.'
-    : 'Microphone mode listens to your voice.';
+  for(const [mode,button] of [['mic',micSourceBtn],['meeting',meetingSourceBtn],['conversation',conversationSourceBtn]]){
+    const selected=audioSourceMode===mode;
+    button.classList.toggle('active',selected);
+    button.setAttribute('aria-pressed',String(selected));
+  }
+  const twoPerson=audioSourceMode==='conversation';
+  for(const id of ['singleLanguageRow','singleTranslationPanels','detectedLanguage','mic']){
+    document.getElementById(id).hidden=twoPerson;
+  }
+  for(const id of ['twoPersonConversation','conversationHistory'])document.getElementById(id).hidden=!twoPerson;
+  document.getElementById('singleTranslationQuality').hidden=twoPerson;
+  sourceHint.textContent=twoPerson?'Take turns speaking into one microphone.'
+    : audioSourceMode==='meeting'
+      ? 'Meeting audio captures sound from a shared tab/screen. When prompted, share the meeting and enable audio.'
+      : 'Microphone mode listens to your voice.';
 }
 
 function updateLanguageButtons(){
@@ -497,6 +586,7 @@ function resetTranslationPipeline(retranslateHistory=false){
   if(retranslateHistory&&interimTranscript)scheduleTranslation(interimTranscript);
 }
 function scheduleTranslation(text){
+  if(conversation.sourceLanguage)return;
   previewText=normalizeSpaces(text||'');
   if(!previewText||pendingTranslations||previewText===lastInterimText||translateTimer!==null)return;
   // Keep the first timer while words arrive and translate the newest snapshot.
@@ -612,7 +702,7 @@ async function createMicrophonePcmStream(sessionId){
   });
   microphoneBuffer=buffer;
   const receive=samples=>{
-    if(!wantsListening||microphoneBuffer!==buffer)return;
+    if(!wantsListening||microphoneBuffer!==buffer||conversation.isFinishing)return;
     lastAudioAt=Date.now();
     let energy=0;
     for(const sample of samples)energy+=sample*sample;
@@ -626,7 +716,7 @@ async function createMicrophonePcmStream(sessionId){
   if(processorNode.port)processorNode.port.onmessage=e=>receive(e.data);
   else processorNode.onaudioprocess=e=>receive(e.inputBuffer.getChannelData(0));
   mediaStream.getAudioTracks().forEach(track=>track.addEventListener('ended',()=>{
-    if(!wantsListening||microphoneBuffer!==buffer)return;
+    if(!wantsListening||microphoneBuffer!==buffer||conversation.isFinishing)return;
     if(isListening)recoverSpeech(true);
     else void cleanupAudio();
   },{once:true}));
@@ -659,7 +749,7 @@ function browserSpeechSupported(){
 }
 
 function startBrowserFallback(){
-  if(input.value==='auto'){
+  if(activeSpeechLanguage()==='auto'){
     setDiagnostic('fallback','error','Automatic detection needs the realtime speech service');
     return false;
   }
@@ -671,7 +761,7 @@ function startBrowserFallback(){
   const current=()=>usingBrowserFallback&&wantsListening&&browserRecognition===recognition;
   browserRecognition.continuous=true;
   browserRecognition.interimResults=true;
-  browserRecognition.lang=input.value;
+  browserRecognition.lang=activeSpeechLanguage();
   usingBrowserFallback=true;
   setDiagnostic('fallback','ok');
 
@@ -689,9 +779,9 @@ function startBrowserFallback(){
     }
     if(finalChunk){
       const finalPhrase=normalizeSpaces(finalChunk);
-      committedTranscript=normalizeSpaces(committedTranscript+' '+finalPhrase);
+      commitCapturedSpeech(finalPhrase);
       interimTranscript=interim;
-      setTranscript();queueFinalTranslation(finalPhrase);
+      setTranscript();
     }else{
       interimTranscript=interim;
       setTranscript();scheduleTranslation(interimTranscript);
@@ -700,6 +790,7 @@ function startBrowserFallback(){
 
   browserRecognition.onerror=(event)=>{
     if(!current())return;
+    if(turnDrain?.session===transcriptionSession){turnDrain.resolve(false);return}
     console.warn('Browser speech fallback error:',event.error);
     if(event.error==='not-allowed'||event.error==='service-not-allowed'){
       wantsListening=false;
@@ -707,14 +798,15 @@ function startBrowserFallback(){
       speechState.textContent='Microphone blocked';
       statusEl.textContent='Microphone access is blocked. Allow microphone permission in your browser settings.';
       mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');
+      failConversationCapture();
     }
   };
 
   browserRecognition.onend=()=>{
-    if(current()){
-      preserveInterimSpeech();
-      try{recognition.start()}catch{}
-    }
+    if(!current())return;
+    if(turnDrain?.session===transcriptionSession){turnDrain.resolve(true);return}
+    preserveInterimSpeech();
+    try{recognition.start()}catch{}
   };
 
   try{
@@ -738,7 +830,7 @@ function stopBrowserFallback(){
 }
 
 function scheduleReconnect(){
-  if(!wantsListening)return;
+  if(!wantsListening||conversation.isFinishing)return;
   if(!navigator.onLine){
     speechState.textContent='Waiting for internet';
     statusEl.textContent='Connection lost — listening will resume automatically';
@@ -750,9 +842,11 @@ function scheduleReconnect(){
     wantsListening=false;
     mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');
     speechState.textContent='Disconnected';
-    statusEl.textContent=input.value==='auto'
+    statusEl.textContent=activeSpeechLanguage()==='auto'
       ?'Automatic detection is unavailable. Try again or choose an input language for compatibility mode.'
+      :conversation.sourceLanguage?'Speech connection failed. Tap a speaker to try again.'
       :'Speech connection failed. Tap the microphone to try again.';
+    failConversationCapture();
     return;
   }
   reconnectAttempts+=1;
@@ -764,7 +858,7 @@ function scheduleReconnect(){
 
 async function startListening(isReconnect=false){
   if(isListening||!wantsListening)return;
-  if(audioSourceMode==='mic'&&!navigator.mediaDevices?.getUserMedia){wantsListening=false;statusEl.textContent='Microphone capture is not supported in this browser.';return}
+  if(audioSourceMode!=='meeting'&&!navigator.mediaDevices?.getUserMedia){wantsListening=false;statusEl.textContent='Microphone capture is not supported in this browser.';failConversationCapture();return}
   if(audioSourceMode==='meeting'&&!navigator.mediaDevices?.getDisplayMedia){wantsListening=false;statusEl.textContent='Meeting audio works in supported desktop browsers such as Chrome and Edge.';return}
   if(!navigator.onLine){setDiagnostic('network','error','Device is offline');scheduleReconnect();return}
   setDiagnostic('network','ok');
@@ -780,6 +874,7 @@ async function startListening(isReconnect=false){
     clearTimeout(sessionLimitTimer);
     sessionLimitTimer=setTimeout(async()=>{
       if(!wantsListening)return;
+      if(conversation.sourceLanguage){await conversation.finish('The recording time limit was reached.');return}
       await stopListening(true);
       statusEl.textContent='30-minute session finished. Tap the microphone to start a new session.';
     },MAX_SESSION_MS);
@@ -819,13 +914,14 @@ async function startListening(isReconnect=false){
       model:gateway.transcriptionModel(speechModel),
       audio:capture.open(),
       inputAudioFormat:{type:'audio/pcm',rate:24000},
-      providerOptions:speechProviderOptions(input.value,speechModel),
+      providerOptions:speechProviderOptions(activeSpeechLanguage(),speechModel),
       abortSignal:sessionController.signal
     });
 
-    statusEl.innerHTML='<span class="liveDot"></span>Listening — tap again to stop';
+    if(!conversation.isFinishing)statusEl.innerHTML='<span class="liveDot"></span>'+(
+      conversation.sourceLanguage?'Listening — tap Finish speaking when done':'Listening — tap again to stop');
     speechState.textContent='Listening';
-    noteUse(input.value);
+    noteUse(activeSpeechLanguage());
 
     for await(const part of result.fullStream){
       if(!wantsListening||sessionId!==transcriptionSession)break;
@@ -852,19 +948,19 @@ async function startListening(isReconnect=false){
         speechSegments.delete(id);
         const text=normalizeSpaces(current.text);
         if(text){
-          committedTranscript=normalizeSpaces(committedTranscript+' '+text);
-          queueFinalTranslation(text);
+          commitCapturedSpeech(text);
         }
       }
       interimTranscript=normalizeSpaces([...speechSegments.values()].map(segment=>segment.text).join(' '));
       setTranscript();
       speechState.textContent=interimTranscript?'Hearing you…':'Captured';
-      if(interimTranscript){
+      if(interimTranscript&&!conversation.sourceLanguage){
         detectSourceWhileSpeaking(interimTranscript);
         scheduleTranslation(interimTranscript);
       }
     }
 
+    if(turnDrain?.session===sessionId){turnDrain.resolve(true);return}
     if(wantsListening&&sessionId===transcriptionSession){
       if(!receivedRealtimeEvent){
         if(speechModel===LIVE_TRANSCRIBE_MODEL)preferWhisper=true;
@@ -876,6 +972,7 @@ async function startListening(isReconnect=false){
     }
   }catch(error){
     if(sessionId!==transcriptionSession)return;
+    if(turnDrain?.session===sessionId){turnDrain.resolve(false);return}
     console.error('Speech session error:',error?.name||'Error');
     setDiagnostic(failureStage,'error',error?.message||'Unknown speech error');
 
@@ -899,6 +996,7 @@ async function startListening(isReconnect=false){
       mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');mic.setAttribute('aria-pressed','false');
       speechState.textContent='Microphone blocked';
       statusEl.textContent='Microphone access is blocked. On iPhone, open this page in Safari and allow microphone access.';
+      failConversationCapture();
       return;
     }
 
@@ -907,6 +1005,7 @@ async function startListening(isReconnect=false){
       mic.classList.remove('listening');mic.textContent='🎤';mic.setAttribute('aria-label','Start listening');mic.setAttribute('aria-pressed','false');
       speechState.textContent='No microphone';
       statusEl.textContent='No microphone was found on this device.';
+      failConversationCapture();
       return;
     }
 
@@ -929,16 +1028,16 @@ async function stopListening(updateUi=true){
   }
 }
 
-mic.onclick=async()=>{
-  if(wantsListening){await stopListening(true);return}
-  if(liveVoiceEnabled){primeNaturalVoice();primeSpeechSynthesis()}
+function beginListening(){
+  if(liveVoiceEnabled||conversation.sourceLanguage){primeNaturalVoice();primeSpeechSynthesis()}
   wantsListening=true;
   usingBrowserFallback=false;
   preferWhisper=false;
   reconnectAttempts=0;
   resetDiagnostics();
-  await startListening(false);
-};
+  return startListening(false);
+}
+mic.onclick=()=>wantsListening?stopListening(true):beginListening();
 document.getElementById('swap').onclick=async()=>{const resumeListening=wantsListening;if(resumeListening)await stopListening(false);const a=input.value;input.value=output.value;output.value=a;updateLanguageButtons();noteUse(input.value);noteUse(output.value);resetTranslationPipeline(true);if(resumeListening){wantsListening=true;reconnectAttempts=0;await startListening(false)}};
 document.getElementById('clear').onclick=()=>{clearMp3Download();speechSegments.clear();committedTranscript='';interimTranscript='';lastRequestedText='';lastLiveVoiceSource='';cancelVoice();resetTranslationPipeline();clearTimeout(liveVoicePauseTimer);if('speechSynthesis' in window)speechSynthesis.cancel();setTranscript();setTranslation('');translationState.textContent='';speechState.textContent=isListening?'Listening':'';statusEl.textContent=isListening?'Listening — tap the microphone to stop':'Tap the microphone and start speaking'};
 copyBtn.onclick=async()=>{if(translationEl.classList.contains('placeholder'))return;try{await navigator.clipboard.writeText(translationEl.textContent);statusEl.textContent='Translation copied'}catch{statusEl.textContent='Copy failed'}};
@@ -961,7 +1060,7 @@ window.addEventListener('offline',()=>{
   if(wantsListening){
     statusEl.textContent='Connection lost — listening will resume automatically';
     speechState.textContent='Waiting for internet';
-    if(isListening&&!usingBrowserFallback)void recoverSpeech();
+    if(isListening&&!usingBrowserFallback&&!conversation.isFinishing)void recoverSpeech();
   }else{
     statusEl.textContent='You are offline. Internet is required for speech and translation.';
   }
@@ -973,7 +1072,7 @@ window.addEventListener('online',()=>{
 });
 window.addEventListener('beforeunload',()=>{if(mediaStream)mediaStream.getTracks().forEach(t=>t.stop())});
 document.addEventListener('visibilitychange',async()=>{
-  if(document.hidden||!wantsListening||usingBrowserFallback)return;
+  if(document.hidden||!wantsListening||usingBrowserFallback||conversation.isFinishing)return;
   if(audioContext?.state==='suspended')try{await audioContext.resume()}catch{}
   if(!isListening){reconnectAttempts=0;scheduleReconnect()}
   else if(healthTimer&&Date.now()-lastAudioAt>8000)recoverSpeech(true);
@@ -984,7 +1083,7 @@ for(const [id,key,fallback] of [['translationQuality','vt-quality','accurate'],[
   control.onchange=async()=>{
     store.set(key,control.value);
     if(id==='voiceQuality')cancelVoice();
-    if(id==='audioProfile'&&wantsListening){
+    if(id==='audioProfile'&&wantsListening&&!conversation.sourceLanguage){
       await stopListening(true);wantsListening=true;reconnectAttempts=0;await startListening(false);
     }
   };
@@ -993,6 +1092,7 @@ if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serv
 
 if(micSourceBtn)micSourceBtn.onclick=()=>setAudioSource('mic');
 if(meetingSourceBtn)meetingSourceBtn.onclick=()=>setAudioSource('meeting');
+if(conversationSourceBtn)conversationSourceBtn.onclick=()=>setAudioSource('conversation');
 applyTheme(store.get('vt-theme','calm'));
 updateLanguageButtons();
 renderAudioSource();
