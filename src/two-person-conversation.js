@@ -71,10 +71,12 @@ export function setupTwoPersonConversation({ document, languages, status, captur
       const selected = active?.person === person;
       button.disabled = finishing || Boolean(handoff || playback || (active && !selected));
       button.setAttribute('aria-pressed', String(selected));
-      button.dataset.next = String(!blocked && person === nextSpeaker);
+      button.dataset.next = String(Boolean(session && !active && !handoff && !playback && person === nextSpeaker));
       const language = session[person];
-      button.textContent = selected ? (finishing ? 'Finishing…' : 'Finish speaking')
-        : language.flag + ' Person ' + (person + 1) + ' · ' + language.name;
+      const label = person === 0 ? 'Teacher' : 'Mother';
+      button.setAttribute('aria-label', label + ' · ' + language.name + (selected ? ' · Finish turn' : ' · Take turn'));
+      button.textContent = selected ? (finishing ? 'Finishing…' : 'Finish turn')
+        : (nextSpeaker === person ? 'Take turn · ' : '') + label + ' · ' + language.name;
     });
     for (const turn of turns) {
       turn.replay.disabled = blocked;
@@ -85,8 +87,8 @@ export function setupTwoPersonConversation({ document, languages, status, captur
   function ready(next, message = '') {
     nextSpeaker = next;
     if (ended) status.textContent = message ? 'Conversation ended. ' + message : 'Conversation ended.';
-    else if (session) status.textContent = message || (next == null ? 'Tap your language to speak.'
-      : 'Your turn · ' + session[next].name + '. Tap your language to speak.');
+    else if (session) status.textContent = message || (next == null ? 'Choose who speaks first, then tap Take turn.'
+      : (next === 0 ? 'Teacher' : 'Mother') + ' speaks ' + session[next].name + '. Tap Take turn when ready.');
     updateControls();
     if (session && next != null && [status, skipAudio, continueTurn].includes(document.activeElement)) speakers[next].focus();
   }
@@ -118,10 +120,9 @@ export function setupTwoPersonConversation({ document, languages, status, captur
     const turn = playback.turn;
     const { next } = playback;
     const restoreFocus = ended && document.activeElement === skipAudio;
+    const playbackMessage = message ? message + (session ? ' Tap Take turn when ready.' : '') : '';
     playback = null;
-    if (message) {
-      ready(next, message + (session ? ' You can take the next turn.' : ''));
-    } else ready(next);
+    ready(next, playbackMessage);
     if (restoreFocus) turn.replay.focus();
   }
 
@@ -236,17 +237,18 @@ export function setupTwoPersonConversation({ document, languages, status, captur
   function finishHandoff(turn) {
     if (handoff !== turn || turn.pending) return;
     handoff = null;
+    const next = 1 - turn.person;
     const canPlay = autoplay.checked && !turn.captureWarning &&
       turn.parts.every(part => part.translation && !part.needsReview);
-    if (canPlay) void playTurn(turn, false);
-    else {
-      const next = 1 - turn.person;
-      const failed = turn.parts.some(part => part.failed);
-      const needsReview = turn.captureWarning || turn.parts.some(part => part.needsReview);
-      const message = failed ? 'Translation incomplete. Retry below or continue in ' + session[next].name + '.'
-        : needsReview ? 'Check the latest turn before continuing in ' + session[next].name + '.' : '';
-      ready(next, message);
-    }
+    const failed = turn.parts.some(part => part.failed);
+    const needsReview = turn.captureWarning || turn.parts.some(part => part.needsReview);
+    const message = failed ? 'Translation incomplete. Review or retry this turn before continuing.'
+      : needsReview ? 'Check the latest turn before continuing.' : '';
+    if (canPlay) {
+      // Playback is part of the completed turn; only the explicit Take turn button starts the next microphone turn.
+      void playTurn(turn, true);
+      if (message) status.textContent = message;
+    } else ready(next, message);
   }
 
   function clearPreview(turn) {
@@ -325,7 +327,7 @@ export function setupTwoPersonConversation({ document, languages, status, captur
       const previous = turns.at(-1);
       if (previous) history.removeChild(previous.item);
       latest.replaceChildren(...(previous ? [previous.item] : []));
-      ready(turn.person, warning || 'No speech was captured. Tap your language to try again.');
+      ready(turn.person, warning || 'No speech was captured. Tap Take turn to try again.');
       speakers[turn.person].focus();
       return;
     }
@@ -363,22 +365,24 @@ export function setupTwoPersonConversation({ document, languages, status, captur
     capture();
   }
 
-  start.onclick = () => {
+  function startConversation() {
     if (session || start.disabled) return;
     session = selectors.map(select => languagesByCode.get(select.value));
     ready();
     speakers[0].focus();
-  };
-  speakers.forEach((button, person) => { button.onclick = () => takeTurn(person); });
-  autoplay.onchange = () => { if (!autoplay.checked) skipPlayback(); };
-  skipAudio.onclick = skipPlayback;
-  continueTurn.onclick = () => {
+  }
+  function handToNext() {
     if (!handoff) return;
     const next = 1 - handoff.person;
     handoff = null;
     ready(next);
-  };
+  }
 
+  start.onclick = startConversation;
+  speakers.forEach((button, person) => { button.onclick = () => takeTurn(person); });
+  autoplay.onchange = () => { if (!autoplay.checked) skipPlayback(); };
+  skipAudio.onclick = skipPlayback;
+  continueTurn.onclick = handToNext;
   async function summarize() {
     if (!ended || summaryRequest) return;
     const transcript = turns.filter(turn => turn.done).map(turn => ({

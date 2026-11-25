@@ -408,7 +408,7 @@ test('two people keep fixed languages, finish recognition, and hear each complet
   assert.equal(visibleTurns(doc).length, 1);
   assert.match(visibleTurns(doc)[0].textContent, /الموعد.*Tuesday/);
   assert.equal(second.disabled, false);
-  assert.equal(doc.activeElement, second);
+  assert.equal(doc.activeElement, doc.getElementById('status'));
 
   second.onclick();
   assert.equal(instances[1].lang, 'ar-AE');
@@ -431,6 +431,50 @@ test('two people keep fixed languages, finish recognition, and hear each complet
   assert.equal(run('committedTranscript'), 'Existing microphone transcript');
   assert.equal(doc.getElementById('inputLang').value, 'fr-FR');
   assert.equal(doc.getElementById('outputLang').value, 'en-US');
+});
+
+test('conversation handoff labels teacher and mother and requires an explicit Take turn after playback', async () => {
+  let finishPlayback;
+  const {run, document: doc, context} = app({requestTranslation: async job => ({translation: job.targetLanguage === 'ar-AE' ? 'ترجمة المعلم' : 'Translation of mother'})});
+  context.voice=[];
+  context.playback=new Promise(resolve=>{finishPlayback=resolve});
+  run(`startListening=async()=>{}; speakText=(text,options)=>{voice.push([text,options.lang]);options.feedback.onPlaying();liveVoiceQueue=playback;return true};document.getElementById('conversationAutoplay').checked=true`);
+  await openTwoPersonMode({document:doc});
+  const teacher=doc.getElementById('personOneTurn'), mother=doc.getElementById('personTwoTurn');
+  assert.match(teacher.textContent,/Teacher.*English/);
+  teacher.onclick();
+  assert.equal(teacher.textContent,'Finish turn');
+  assert.equal(mother.disabled,true);
+  run("commitCapturedSpeech('Sara is improving in mathematics')");
+  await run('conversation.finish()');
+  assert.equal(mother.disabled,true);
+  await tick();
+  assert.equal(mother.disabled,true);
+  assert.match(doc.getElementById('status').textContent,/Playing translation/);
+  finishPlayback();
+  await tick();
+  assert.equal(mother.disabled,false);
+  assert.equal(mother.textContent,'Mother · Arabic (Gulf)');
+  assert.match(mother.getAttribute('aria-label'),/Take turn/);
+  assert.equal(doc.getElementById('status').textContent,'Choose who speaks first, then tap Take turn.');
+  assert.equal(context.voice[0][1],'ar-AE');
+  assert.equal(run('conversation.sourceLanguage'),undefined);
+  mother.onclick();
+  assert.equal(run('conversation.sourceLanguage'),'ar-AE');
+  assert.equal(teacher.disabled,true);
+  mother.onclick();
+  await tick();
+  assert.equal(run('conversation.sourceLanguage'),undefined);
+  assert.equal(teacher.disabled,false);
+  // Starting turn two returns the UI to active state; after the mother finishes it, teacher must explicitly take turn again.
+  mother.onclick();
+  assert.equal(run('conversation.sourceLanguage'),'ar-AE');
+  run("commitCapturedSpeech('Thank you for explaining')");
+  mother.onclick();
+  await tick();
+  assert.equal(run('conversation.sourceLanguage'),undefined);
+  assert.equal(teacher.textContent,'Teacher · English');
+  assert.match(teacher.getAttribute('aria-label'),/Take turn/);
 });
 
 test('a slow turn blocks handoff through playback and a retry updates only the failed message', async () => {
