@@ -433,6 +433,48 @@ test('two people keep fixed languages, finish recognition, and hear each complet
   assert.equal(doc.getElementById('outputLang').value, 'en-US');
 });
 
+test('conversation handoff labels teacher and mother and requires an explicit Take turn after playback', async () => {
+  let finishPlayback;
+  const {run, document: doc, context} = app({requestTranslation: async job => ({translation: job.targetLanguage === 'ar-AE' ? 'ترجمة المعلم' : 'Translation of mother'})});
+  context.voice=[];
+  context.playback=new Promise(resolve=>{finishPlayback=resolve});
+  run(`startListening=async()=>{}; speakText=(text,options)=>{voice.push([text,options.lang]);options.feedback.onPlaying();liveVoiceQueue=playback;return true};document.getElementById('conversationAutoplay').checked=true`);
+  await openTwoPersonMode({document:doc});
+  const teacher=doc.getElementById('personOneTurn'), mother=doc.getElementById('personTwoTurn');
+  assert.match(teacher.textContent,/Teacher.*English/);
+  teacher.onclick();
+  assert.equal(teacher.textContent,'Finish turn');
+  assert.equal(mother.disabled,true);
+  run("commitCapturedSpeech('Sara is improving in mathematics')");
+  await run('conversation.finish()');
+  assert.equal(mother.disabled,true);
+  await tick();
+  assert.equal(mother.disabled,true);
+  assert.match(doc.getElementById('status').textContent,/Playing translation/);
+  finishPlayback();
+  await tick();
+  assert.equal(mother.disabled,false);
+  assert.match(mother.textContent,/Take turn.*Mother.*Arabic/);
+  assert.equal(doc.getElementById('status').textContent,'Mother speaks Arabic (Gulf). Tap Take turn when ready.');
+  assert.equal(context.voice[0][1],'ar-AE');
+  assert.equal(run('conversation.sourceLanguage'),undefined);
+  mother.onclick();
+  assert.equal(run('conversation.sourceLanguage'),'ar-AE');
+  assert.equal(teacher.disabled,true);
+  mother.onclick();
+  await tick();
+  assert.equal(run('conversation.sourceLanguage'),undefined);
+  assert.equal(teacher.disabled,false);
+  // Starting turn two returns the UI to active state; after the mother finishes it, teacher must explicitly take turn again.
+  mother.onclick();
+  assert.equal(run('conversation.sourceLanguage'),'ar-AE');
+  run("commitCapturedSpeech('Thank you for explaining')");
+  mother.onclick();
+  await tick();
+  assert.equal(run('conversation.sourceLanguage'),undefined);
+  assert.match(teacher.textContent,/Take turn.*Teacher.*English/);
+});
+
 test('a slow turn blocks handoff through playback and a retry updates only the failed message', async () => {
   let resolveFirst, finishPlayback;
   let shouldFail = true;

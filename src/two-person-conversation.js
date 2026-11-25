@@ -71,12 +71,12 @@ export function setupTwoPersonConversation({ document, languages, status, captur
       const selected = active?.person === person;
       button.disabled = finishing || Boolean(handoff || playback || (active && !selected));
       button.setAttribute('aria-pressed', String(selected));
-      button.dataset.next = String(!blocked && person === nextSpeaker);
+      button.dataset.next = String(Boolean(session && !active && !handoff && !playback && person === nextSpeaker));
       const language = session[person];
       const label = person === 0 ? 'Teacher' : 'Mother';
       button.setAttribute('aria-label', label + ' · ' + language.name + (selected ? ' · Finish turn' : ' · Take turn'));
       button.textContent = selected ? (finishing ? 'Finishing…' : 'Finish turn')
-        : (nextSpeaker === person ? 'Take turn · ' : '') + label + ' · ' + language.name;
+        : ((session && !active && !handoff && !playback && nextSpeaker === person) ? 'Take turn · ' : '') + label + ' · ' + language.name;
     });
     for (const turn of turns) {
       turn.replay.disabled = blocked;
@@ -234,7 +234,7 @@ export function setupTwoPersonConversation({ document, languages, status, captur
     turn.retry.disabled = Boolean(active || handoff || playback);
   }
 
-  function finishHandoff(turn) {
+  async function finishHandoff(turn) {
     if (handoff !== turn || turn.pending) return;
     handoff = null;
     const next = 1 - turn.person;
