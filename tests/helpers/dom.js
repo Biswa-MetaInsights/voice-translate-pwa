@@ -27,7 +27,7 @@ export function createDocument(){
       focus(){document.activeElement=this},
       get textContent(){return this.children.map(x=>x.textContent).join('')},
       set textContent(value){this.replaceChildren(document.createTextNode(value))},
-      setAttribute(){},removeAttribute(){},addEventListener(){},
+      attributes:{},setAttribute(name,value){this.attributes[name]=String(value)},getAttribute(name){return this.attributes[name]??null},removeAttribute(name){delete this.attributes[name]},addEventListener(){},
       set innerHTML(value){this.children=[]},get innerHTML(){return ''}};
   };
   document.getElementById=id=>{if(!elements.has(id))elements.set(id,document.createElement());return elements.get(id)};

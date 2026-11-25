@@ -408,7 +408,7 @@ test('two people keep fixed languages, finish recognition, and hear each complet
   assert.equal(visibleTurns(doc).length, 1);
   assert.match(visibleTurns(doc)[0].textContent, /الموعد.*Tuesday/);
   assert.equal(second.disabled, false);
-  assert.equal(doc.activeElement, second);
+  assert.equal(doc.activeElement, doc.getElementById('status'));
 
   second.onclick();
   assert.equal(instances[1].lang, 'ar-AE');
@@ -454,8 +454,9 @@ test('conversation handoff labels teacher and mother and requires an explicit Ta
   finishPlayback();
   await tick();
   assert.equal(mother.disabled,false);
-  assert.match(mother.textContent,/Take turn.*Mother.*Arabic/);
-  assert.equal(doc.getElementById('status').textContent,'Mother speaks Arabic (Gulf). Tap Take turn when ready.');
+  assert.equal(mother.textContent,'Mother · Arabic (Gulf)');
+  assert.match(mother.getAttribute('aria-label'),/Take turn/);
+  assert.equal(doc.getElementById('status').textContent,'Choose who speaks first, then tap Take turn.');
   assert.equal(context.voice[0][1],'ar-AE');
   assert.equal(run('conversation.sourceLanguage'),undefined);
   mother.onclick();
@@ -472,7 +473,8 @@ test('conversation handoff labels teacher and mother and requires an explicit Ta
   mother.onclick();
   await tick();
   assert.equal(run('conversation.sourceLanguage'),undefined);
-  assert.match(teacher.textContent,/Take turn.*Teacher.*English/);
+  assert.equal(teacher.textContent,'Teacher · English');
+  assert.match(teacher.getAttribute('aria-label'),/Take turn/);
 });
 
 test('a slow turn blocks handoff through playback and a retry updates only the failed message', async () => {

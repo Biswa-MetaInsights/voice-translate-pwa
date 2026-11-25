@@ -76,7 +76,7 @@ export function setupTwoPersonConversation({ document, languages, status, captur
       const label = person === 0 ? 'Teacher' : 'Mother';
       button.setAttribute('aria-label', label + ' · ' + language.name + (selected ? ' · Finish turn' : ' · Take turn'));
       button.textContent = selected ? (finishing ? 'Finishing…' : 'Finish turn')
-        : ((session && !active && !handoff && !playback && nextSpeaker === person) ? 'Take turn · ' : '') + label + ' · ' + language.name;
+        : (nextSpeaker === person ? 'Take turn · ' : '') + label + ' · ' + language.name;
     });
     for (const turn of turns) {
       turn.replay.disabled = blocked;
@@ -234,7 +234,7 @@ export function setupTwoPersonConversation({ document, languages, status, captur
     turn.retry.disabled = Boolean(active || handoff || playback);
   }
 
-  async function finishHandoff(turn) {
+  function finishHandoff(turn) {
     if (handoff !== turn || turn.pending) return;
     handoff = null;
     const next = 1 - turn.person;
@@ -246,10 +246,9 @@ export function setupTwoPersonConversation({ document, languages, status, captur
       : needsReview ? 'Check the latest turn before continuing.' : '';
     if (canPlay) {
       // Playback is part of the completed turn; only the explicit Take turn button starts the next microphone turn.
-      await playTurn(turn, true);
-    }
-    ready(next, message);
-
+      void playTurn(turn, true);
+      if (message) status.textContent = message;
+    } else ready(next, message);
   }
 
   function clearPreview(turn) {
@@ -366,22 +365,24 @@ export function setupTwoPersonConversation({ document, languages, status, captur
     capture();
   }
 
-  start.onclick = () => {
+  function startConversation() {
     if (session || start.disabled) return;
     session = selectors.map(select => languagesByCode.get(select.value));
     ready();
     speakers[0].focus();
-  };
-  speakers.forEach((button, person) => { button.onclick = () => takeTurn(person); });
-  autoplay.onchange = () => { if (!autoplay.checked) skipPlayback(); };
-  skipAudio.onclick = skipPlayback;
-  continueTurn.onclick = () => {
+  }
+  function handToNext() {
     if (!handoff) return;
     const next = 1 - handoff.person;
     handoff = null;
     ready(next);
-  };
+  }
 
+  start.onclick = startConversation;
+  speakers.forEach((button, person) => { button.onclick = () => takeTurn(person); });
+  autoplay.onchange = () => { if (!autoplay.checked) skipPlayback(); };
+  skipAudio.onclick = skipPlayback;
+  continueTurn.onclick = handToNext;
   async function summarize() {
     if (!ended || summaryRequest) return;
     const transcript = turns.filter(turn => turn.done).map(turn => ({
