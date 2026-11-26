@@ -39,7 +39,11 @@ jobs:
           log-accepted-android-sdk-licenses: 'false'
       - run: node mobile/scripts/install-shared.mjs
       - name: Install audio decoder verification tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        run: |
+          if ! command -v ffprobe >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
       - run: npm test && npm run build
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: mobile
@@ -57,8 +61,9 @@ jobs:
           api-level: 36
           arch: x86_64
           working-directory: mobile/android
-          script: ./gradlew connectedDebugAndroidTest --console=plain
+          script: ./gradlew :app:connectedDebugAndroidTest --console=plain
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: android-validation-not-for-store
           path: |

@@ -15,7 +15,7 @@ MOBILE_BACKEND_ORIGIN=https://YOUR-MOBILE-BACKEND.vercel.app npm run build
 npm run sync
 cd android
 ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug
-./gradlew connectedDebugAndroidTest
+./gradlew :app:connectedDebugAndroidTest
 ```
 
 For CI-only release compilation, `MOBILE_UNSIGNED_VALIDATION=true ./gradlew :app:bundleRelease`. This creates an **unsigned validation bundle**, which must never be presented as a signed Play upload. Inspect the release merged manifest, exported components, SDKs and any native libraries, then verify 16 KB compatibility in Play's bundle explorer. An empty native-library list is evidence only for that binary.
