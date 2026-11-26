@@ -81,3 +81,12 @@ test('a failed later translation chunk does not return an apparently complete tr
   try{value=await translateVoiceNote(new Blob([ogg()]),{consent:true,fetchImpl:async()=>Response.json({text:'Arabic phrase '.repeat(300)}),translate:async()=>{if(++count===2)throw new Error('failed chunk');return {translation:'partial'};}});}catch(error){assert.match(error.message,/failed chunk/);}
   assert.equal(count,2);assert.equal(value,undefined);
 });
+
+test('privacy referrer policy may omit Origin on a genuine same-origin browser upload',async()=>{
+  const h=handler();
+  const same=req(ogg(),{'sec-fetch-site':'same-origin'});same.headers.delete('origin');
+  assert.equal((await h(same)).status,200);
+  assert.equal((await h(req(ogg(),{origin:'null','sec-fetch-site':'same-origin'}))).status,200);
+  assert.equal((await h(req(ogg(),{origin:'https://other.example','sec-fetch-site':'same-origin'}))).status,403);
+  assert.equal((await h(req(ogg(),{origin:'null','sec-fetch-site':'cross-site'}))).status,403);
+});
