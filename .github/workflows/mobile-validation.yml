@@ -14,6 +14,9 @@ on:
         type: string
 permissions:
   contents: read
+concurrency:
+  group: mobile-validation-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   android:
     runs-on: ubuntu-24.04
@@ -45,6 +48,8 @@ jobs:
         working-directory: mobile/android
         env:
           MOBILE_UNSIGNED_VALIDATION: 'true'
+      - name: Grant this ephemeral runner access to its KVM device
+        run: sudo chown "$(id -u):$(id -g)" /dev/kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
