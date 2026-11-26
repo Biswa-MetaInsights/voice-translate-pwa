@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "sync": "node scripts/configure-ios.mjs && cap sync",
+    "sync": "node scripts/configure-ios.mjs && cap sync && node scripts/finalize-ios.mjs",
     "icons": "node scripts/icons.mjs",
     "android": "cap open android",
     "ios": "cap open ios",

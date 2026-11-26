@@ -16,7 +16,7 @@ permissions:
   contents: read
 jobs:
   android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       MOBILE_BACKEND_ORIGIN: ${{ inputs.backend_origin || 'https://mobile-test.voicetranslator.eu' }}
@@ -29,6 +29,11 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+      - uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: '15859902'
+          accept-android-sdk-licenses: 'yes'
+          log-accepted-android-sdk-licenses: 'false'
       - run: node mobile/scripts/install-shared.mjs
       - run: npm test && npm run build
       - run: npm ci --ignore-scripts --no-audit --no-fund
