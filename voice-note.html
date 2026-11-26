@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f766e"><meta name="referrer" content="no-referrer">
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml">
+<title>Translate a voice note · VoiceTranslator.eu</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:#102522;background:#f3fbfa;font-synthesis:none}*{box-sizing:border-box}body{margin:0;padding:24px 16px}main{max-width:720px;margin:auto}a{color:#0f766e}header{display:flex;gap:12px;align-items:center;margin:22px 0}header img{width:46px;height:46px}h1{font-size:clamp(1.35rem,5vw,1.9rem);margin:0}header p{margin:6px 0 0;color:#48655f;line-height:1.5}.card{background:#fff;border:1px solid #dcebe8;border-radius:22px;padding:22px;margin:16px 0;box-shadow:0 14px 42px #0f766e0b}.eyebrow{color:#0f766e;font-size:.8rem;font-weight:750}h2{font-size:1.1rem;margin:0 0 12px}p,li{line-height:1.6}.muted{color:#48655f;font-size:.9rem}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0}label{font-weight:650}select,input[type=file]{display:block;width:100%;font:inherit;border:1px solid #c6dbd5;border-radius:12px;padding:12px;margin-top:8px;background:#fff;color:#102522}input[type=file]{padding:16px 10px;font-size:.9rem}button{font:inherit;min-height:48px;padding:12px 18px;border:1px solid #bcd4ce;border-radius:12px;background:#fff;color:#102522;cursor:pointer}button.primary{background:#0f766e;border-color:#0f766e;color:#fff;font-weight:750}button:disabled{opacity:.5;cursor:default}.actions{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 0}.consent{display:flex;align-items:flex-start;gap:10px;font-weight:400;font-size:.9rem;line-height:1.5;margin:18px 0}.consent input{width:22px;height:22px;flex:none;margin:0;accent-color:#0f766e}audio{width:100%;margin-top:14px}.text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;background:#f3faf8;border-radius:12px;padding:16px;min-height:80px}#voiceNoteStatus{min-height:1.5em;margin:14px 0 0;line-height:1.5;color:#315e54}.review{background:#fff5df;border:1px solid #eddaad;padding:12px 16px;border-radius:12px;font-size:.9rem}.steps{padding-left:22px;margin-bottom:0}summary{cursor:pointer;font-weight:650}[hidden]{display:none!important}:focus-visible{outline:3px solid #19aba0;outline-offset:3px}@media(max-width:400px){.card{padding:16px}.grid{gap:10px}select{padding:10px 6px}.actions button{flex:1}}
+</style>
+</head>
+<body>
+<main>
+<a href="/">← Live translator</a>
+<header><img src="/icon.svg" alt=""><div><h1>Translate a voice note</h1><p>Open a note from WhatsApp and read it in your language.</p></div></header>
+<section class="card" aria-labelledby="chooseTitle">
+<p class="eyebrow">A note you choose. A translation you can check.</p>
+<h2 id="chooseTitle">1. Choose your voice note</h2>
+<label for="voiceNoteFile">Audio file</label>
+<input id="voiceNoteFile" type="file" accept=".opus,.ogg,.m4a,.mp3,.wav,.webm,audio/ogg,audio/mp4,audio/mpeg,audio/wav,audio/webm" aria-describedby="fileHint">
+<p class="muted" id="fileHint">Opus/OGG, M4A, MP3, WAV or WebM · Up to 4 MB and five minutes.</p>
+<p class="muted" id="selectedNote">No voice note selected.</p>
+<audio id="originalNoteAudio" controls preload="none" hidden aria-label="Play the original voice note"></audio>
+<div class="grid"><label for="voiceNoteSource">Spoken language<select id="voiceNoteSource"></select></label><label for="voiceNoteTarget">Translate into<select id="voiceNoteTarget"></select></label></div>
+<label class="consent"><input id="voiceNoteConsent" type="checkbox"><span>I agree to send this selected audio to VoiceTranslator.eu’s speech service and its transcript to the translation service. I have permission to process this note. <a href="/privacy.html" target="_blank" rel="noopener">Privacy notice</a>.</span></label>
+<div class="actions"><button class="primary" id="translateNote" disabled>Translate voice note</button><button id="cancelNote" hidden>Cancel</button><button id="clearNote" disabled>Clear</button></div>
+<p id="voiceNoteStatus" role="status" aria-live="polite">Choose a voice note to begin.</p>
+</section>
+<section class="card" id="noteResults" hidden aria-labelledby="resultTitle">
+<h2 id="resultTitle">2. Review the result</h2>
+<p class="review">Check names, dates, times and instructions against the original audio before acting. Speech recognition can miss details.</p>
+<h3>Original transcript</h3><div class="text" id="noteTranscript" dir="auto"></div>
+<h3 id="translationHeading">Translation</h3><div class="text" id="noteTranslation" dir="auto"></div>
+<div class="actions"><button id="copyNoteTranslation" disabled>Copy translation</button><button id="playNoteTranslation" disabled>Listen to translation</button><button id="stopNotePlayback" hidden>Stop playback</button></div>
+<audio id="translatedNoteAudio" controls hidden aria-label="Play the translated voice note"></audio>
+</section>
+<details class="card"><summary>How to open a WhatsApp voice note</summary>
+<ol class="steps"><li>In WhatsApp, press and hold the voice note and open the available Share options.</li><li>On supported Android devices, choose VoiceTranslator if you have installed the web app and it appears in the Share list.</li><li>If it is not listed, save the note to your files. Open this page and choose the saved audio file. On iPhone, use Save to Files where WhatsApp offers it.</li><li>Select the languages, confirm processing, then tap Translate voice note.</li></ol>
+<p class="muted">WhatsApp’s Forward action sends to WhatsApp contacts. To open the note here, use Share or select a saved file. Availability depends on your device and WhatsApp version.</p>
+</details>
+<p class="muted">The app holds the selected note and result in memory until you clear or leave this page. It does not save them to an application database. Cloud providers apply their own processing and retention terms.</p>
+</main>
+<script type="module" src="/src/voice-note.js"></script>
+</body>
+</html>
