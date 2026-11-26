@@ -1,0 +1,28 @@
+{
+  "name": "voicetranslator-mobile",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "sync": "node scripts/configure-ios.mjs && cap sync",
+    "icons": "node scripts/icons.mjs",
+    "android": "cap open android",
+    "ios": "cap open ios",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.3",
+    "@capacitor/core": "8.6.3",
+    "@capacitor/filesystem": "8.1.5",
+    "@capacitor/ios": "8.6.3",
+    "@capacitor/share": "8.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.3",
+    "@electric-sql/pglite": "0.6.0",
+    "@resvg/resvg-js": "2.6.2",
+    "vite": "7.3.8",
+    "xcode": "4.0.0"
+  }
+}

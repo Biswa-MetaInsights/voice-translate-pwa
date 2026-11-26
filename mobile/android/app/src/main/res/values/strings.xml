@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">VoiceTranslator</string>
+    <string name="title_activity_main">VoiceTranslator</string>
+    <string name="package_name">eu.voicetranslator.app</string>
+    <string name="custom_url_scheme">eu.voicetranslator.app</string>
+</resources>

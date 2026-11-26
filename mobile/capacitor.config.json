@@ -1,0 +1,9 @@
+{
+  "appId": "eu.voicetranslator.app",
+  "appName": "VoiceTranslator",
+  "webDir": "dist",
+  "loggingBehavior": "none",
+  "server": { "hostname": "localhost", "androidScheme": "https", "iosScheme": "capacitor", "cleartext": false },
+  "android": { "allowMixedContent": false, "webContentsDebuggingEnabled": false, "backgroundColor": "#f3fbfa" },
+  "ios": { "contentInset": "automatic", "preferredContentMode": "mobile", "backgroundColor": "#f3fbfa" }
+}

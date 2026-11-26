@@ -1,0 +1,83 @@
+apply plugin: 'com.android.application'
+
+def uploadValues = ['ANDROID_KEYSTORE_PATH','ANDROID_KEYSTORE_PASSWORD','ANDROID_KEY_ALIAS','ANDROID_KEY_PASSWORD'].collect { System.getenv(it) }
+def uploadConfigured = uploadValues.every { it != null && !it.isEmpty() }
+if (uploadValues.any { it != null && !it.isEmpty() } && !uploadConfigured) {
+    throw new GradleException('Incomplete Android upload signing configuration. Supply all four ANDROID_KEYSTORE_* / ANDROID_KEY_* variables privately.')
+}
+def releaseVersion = System.getenv('MOBILE_RELEASE_VERSION_CODE') ?: '1'
+if (!(releaseVersion ==~ /[1-9][0-9]{0,8}/)) throw new GradleException('MOBILE_RELEASE_VERSION_CODE must be a positive integer below 1000000000.')
+
+android {
+    namespace = "eu.voicetranslator.app"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "eu.voicetranslator.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode releaseVersion.toInteger()
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        upload {
+            if (uploadConfigured) {
+                storeFile file(uploadValues[0])
+                storePassword uploadValues[1]
+                keyAlias uploadValues[2]
+                keyPassword uploadValues[3]
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (uploadConfigured) signingConfig signingConfigs.upload
+            debuggable false
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def releaseRequested = graph.allTasks.any { it.project == project && it.name in ['bundleRelease','assembleRelease'] }
+    if (releaseRequested && System.getenv('MOBILE_UNSIGNED_VALIDATION') != 'true') {
+        if (!uploadConfigured) throw new GradleException('Release blocked: Android upload signing secrets are required. Unsigned validation is for CI only.')
+        if (!System.getenv('MOBILE_RELEASE_VERSION_CODE')) throw new GradleException('Release blocked: set the intended MOBILE_RELEASE_VERSION_CODE.')
+        if (System.getenv('MOBILE_RELEASE_APPROVED') != 'true') throw new GradleException('Release blocked: run the release checklist and explicitly set MOBILE_RELEASE_APPROVED=true.')
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
