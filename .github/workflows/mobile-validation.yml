@@ -35,9 +35,11 @@ jobs:
       - uses: android-actions/setup-android@v4
         with:
           cmdline-tools-version: '15859902'
-          accept-android-sdk-licenses: 'yes'
+          accept-android-sdk-licenses: 'true'
           log-accepted-android-sdk-licenses: 'false'
       - run: node mobile/scripts/install-shared.mjs
+      - name: Install audio decoder verification tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: npm test && npm run build
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: mobile
