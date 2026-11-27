@@ -18,6 +18,8 @@ Run the `Mobile validation` workflow on `feat/mobile-apps`, or connect an Androi
 
 Tests generate PCM silence and contain a tiny FFmpeg-generated OGG/Opus silence fixture. They contain no recorded people or WhatsApp message content. Files are written only to the existing app-private export-cache subtree for the test, read through the production FileProvider/receiver, then deleted. Production APK/AAB assets do not include instrumentation code or fixture bytes.
 
+The product intentionally uses `preload=none` for the original note. Decoder checks explicitly request local-blob metadata loading in the test, without playing or uploading the audio. They do not assert that selecting a file automatically loads it.
+
 The intent is sent by the test application context, using the same app-owned provider. This exercises native URI reading and WebView handoff; it does **not** establish WhatsApp's actual Share-menu behavior or another application's cross-UID permission grants. The failure/cancellation responses are injected only into that test's WebView. No real backend, speech provider, Meta API or real message is contacted. Synthetic silence is a decoder fixture, not a speech-accuracy sample.
 
 ## Evidence

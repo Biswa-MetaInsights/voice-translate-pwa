@@ -82,6 +82,7 @@ public class SharedVoiceNoteFlowTest {
             if ("true".equals(evaluate(scenario, "Boolean(" + condition + ")"))) return;
             Thread.sleep(100);
         }
+        screenshot("failure-" + Integer.toUnsignedString(message.hashCode()));
         fail(message);
     }
 
@@ -91,6 +92,10 @@ public class SharedVoiceNoteFlowTest {
             " && document.getElementById('voiceNoteStatus')?.textContent.startsWith('Ready.')");
         assertEquals("true", evaluate(scenario,
             "document.getElementById('translateNote').disabled && !document.getElementById('voiceNoteConsent').checked && document.getElementById('noteResults').hidden"));
+        // The product correctly uses preload=none. Explicitly request decoding
+        // of this local blob; selecting a note must not auto-play or upload it.
+        assertEquals("true", evaluate(scenario,
+            "(() => { const audio = document.getElementById('originalNoteAudio'); audio.preload = 'metadata'; audio.load(); return true; })()"));
         await(scenario, "Synthetic audio did not decode in the installed WebView",
             "document.getElementById('originalNoteAudio')?.readyState >= 1 && document.getElementById('originalNoteAudio').duration > 0.20 && document.getElementById('originalNoteAudio').duration < 0.35");
     }
@@ -210,7 +215,7 @@ public class SharedVoiceNoteFlowTest {
     @Test public void simulatedServiceFailureAndCancellationNeverInventTranslation() throws Exception {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(share(file("errors.wav", wav())))) {
             selected(scenario, wav().length);
-            evaluate(scenario, "window.__testCalls = 0; window.fetch = async () => { window.__testCalls++; return new Response(JSON.stringify({error:'Test service unavailable. Try again later.'}), {status:503,headers:{'Content-Type':'application/json'}}); }; true");
+            assertEquals("true", evaluate(scenario, "window.__testCalls = 0; window.fetch = async () => { window.__testCalls++; return new Response(JSON.stringify({error:'Test service unavailable. Try again later.'}), {status:503,headers:{'Content-Type':'application/json'}}); }; true"));
             tap(scenario, "translateNote");
             assertEquals("0", evaluate(scenario, "window.__testCalls"));
             tap(scenario, "voiceNoteConsent");
@@ -220,7 +225,7 @@ public class SharedVoiceNoteFlowTest {
                 "document.getElementById('voiceNoteStatus').textContent === 'Test service unavailable. Try again later.' && !document.getElementById('translateNote').disabled");
             assertEquals("true", evaluate(scenario, "window.__testCalls === 1 && document.getElementById('noteResults').hidden && !document.getElementById('noteTranslation').textContent"));
             screenshot("04-simulated-service-failure");
-            evaluate(scenario, "window.fetch = (input, options) => new Promise((resolve, reject) => { window.__testCalls++; options.signal.addEventListener('abort', () => reject(new DOMException('Cancelled','AbortError')), {once:true}); }); true");
+            assertEquals("true", evaluate(scenario, "window.fetch = (input, options) => new Promise((resolve, reject) => { window.__testCalls++; options.signal.addEventListener('abort', () => reject(new DOMException('Cancelled','AbortError')), {once:true}); }); true"));
             tap(scenario, "translateNote");
             await(scenario, "Pending request did not show Cancel", "!document.getElementById('cancelNote').hidden && document.getElementById('translateNote').disabled && window.__testCalls === 2");
             tap(scenario, "cancelNote");
