@@ -2,6 +2,7 @@ package eu.voicetranslator.app;
 
 import static org.junit.Assert.*;
 
+import android.app.Activity;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
@@ -11,7 +12,9 @@ import android.os.SystemClock;
 import android.util.Base64;
 import android.view.MotionEvent;
 import androidx.core.content.FileProvider;
-import androidx.test.core.app.ActivityScenario;
+import androidx.test.runner.lifecycle.ActivityLifecycleCallback;
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
+import androidx.test.runner.lifecycle.Stage;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.File;
@@ -22,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import org.json.JSONObject;
 import org.junit.After;
 import org.junit.Test;
@@ -35,6 +39,76 @@ import org.junit.runner.RunWith;
 public class SharedVoiceNoteFlowTest {
     private final Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
     private final File fixtures = new File(context.getCacheDir(), "voice-translator-exports/simulator-fixtures");
+
+    /** Tracks lifecycle by class, because consuming ACTION_SEND intentionally changes
+     * its action to ACTION_MAIN. ActivityScenario matches the original action and
+     * consequently cannot track this privacy-preserving cold-share lifecycle. */
+    private static final class SharedActivity implements AutoCloseable {
+        private final AtomicReference<MainActivity> current = new AtomicReference<>();
+        private final AtomicReference<CountDownLatch> resumed = new AtomicReference<>(new CountDownLatch(1));
+        private final AtomicReference<CountDownLatch> destroyed = new AtomicReference<>();
+        private final ActivityLifecycleCallback observer = (Activity activity, Stage stage) -> {
+            if (!(activity instanceof MainActivity)) return;
+            if (stage == Stage.RESUMED) {
+                current.set((MainActivity) activity);
+                CountDownLatch signal = resumed.get();
+                if (signal != null) signal.countDown();
+            } else if (stage == Stage.DESTROYED) {
+                current.compareAndSet((MainActivity) activity, null);
+                CountDownLatch signal = destroyed.get();
+                if (signal != null) signal.countDown();
+            }
+        };
+
+        static SharedActivity launch(Class<MainActivity> type) throws Exception {
+            Context target = InstrumentationRegistry.getInstrumentation().getTargetContext();
+            return launch(new Intent(target, type).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        }
+
+        static SharedActivity launch(Intent intent) throws Exception {
+            SharedActivity tracked = new SharedActivity();
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
+                ActivityLifecycleMonitorRegistry.getInstance().addLifecycleCallback(tracked.observer));
+            try {
+                InstrumentationRegistry.getInstrumentation().getTargetContext().startActivity(intent);
+                assertTrue("Shared activity did not resume", tracked.resumed.get().await(30, TimeUnit.SECONDS));
+                InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+                return tracked;
+            } catch (Exception | AssertionError failure) {
+                tracked.close();
+                throw failure;
+            }
+        }
+
+        void onActivity(Consumer<MainActivity> action) {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                MainActivity activity = current.get();
+                assertNotNull("Shared activity is unavailable", activity);
+                action.accept(activity);
+            });
+        }
+
+        void recreate() throws Exception {
+            CountDownLatch next = new CountDownLatch(1);
+            resumed.set(next);
+            onActivity(MainActivity::recreate);
+            assertTrue("Recreated shared activity did not resume", next.await(30, TimeUnit.SECONDS));
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        }
+
+        @Override public void close() throws Exception {
+            CountDownLatch stopped = new CountDownLatch(1);
+            destroyed.set(stopped);
+            boolean hadActivity = current.get() != null;
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                MainActivity activity = current.get();
+                if (activity != null) activity.finish();
+            });
+            if (hadActivity) stopped.await(10, TimeUnit.SECONDS);
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
+                ActivityLifecycleMonitorRegistry.getInstance().removeLifecycleCallback(observer));
+        }
+    }
 
     private byte[] wav() {
         int samples = 4_000; // 250 ms of mono 16 kHz PCM silence; no personal audio.
@@ -66,7 +140,7 @@ public class SharedVoiceNoteFlowTest {
         return intent;
     }
 
-    private String evaluate(ActivityScenario<MainActivity> scenario, String script) throws Exception {
+    private String evaluate(SharedActivity scenario, String script) throws Exception {
         CountDownLatch done = new CountDownLatch(1);
         AtomicReference<String> result = new AtomicReference<>();
         scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(script, value -> {
@@ -76,7 +150,7 @@ public class SharedVoiceNoteFlowTest {
         return result.get();
     }
 
-    private void await(ActivityScenario<MainActivity> scenario, String message, String condition) throws Exception {
+    private void await(SharedActivity scenario, String message, String condition) throws Exception {
         long deadline = SystemClock.elapsedRealtime() + 30_000;
         while (SystemClock.elapsedRealtime() < deadline) {
             if ("true".equals(evaluate(scenario, "Boolean(" + condition + ")"))) return;
@@ -86,7 +160,7 @@ public class SharedVoiceNoteFlowTest {
         fail(message);
     }
 
-    private void selected(ActivityScenario<MainActivity> scenario, int bytes) throws Exception {
+    private void selected(SharedActivity scenario, int bytes) throws Exception {
         await(scenario, "Shared audio did not reach the ready note screen",
             "document.getElementById('voiceNoteFile')?.files[0]?.size === " + bytes +
             " && document.getElementById('voiceNoteStatus')?.textContent.startsWith('Ready.')");
@@ -100,7 +174,7 @@ public class SharedVoiceNoteFlowTest {
             "document.getElementById('originalNoteAudio')?.readyState >= 1 && document.getElementById('originalNoteAudio').duration > 0.20 && document.getElementById('originalNoteAudio').duration < 0.35");
     }
 
-    private void tap(ActivityScenario<MainActivity> scenario, String id) throws Exception {
+    private void tap(SharedActivity scenario, String id) throws Exception {
         JSONObject point = new JSONObject(evaluate(scenario,
             "(() => { const e = document.getElementById(" + JSONObject.quote(id) + "); e.scrollIntoView({block:'center',behavior:'instant'}); const r = e.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2,width:innerWidth}; })()"));
         int[] bounds = new int[3];
@@ -139,7 +213,7 @@ public class SharedVoiceNoteFlowTest {
 
     @Test public void coldShareDecodesWavRequiresConsentAndClears() throws Exception {
         byte[] audio = wav();
-        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(share(file("cold.wav", audio)))) {
+        try (SharedActivity scenario = SharedActivity.launch(share(file("cold.wav", audio)))) {
             selected(scenario, audio.length);
             screenshot("01-shared-note-awaiting-consent");
             tap(scenario, "voiceNoteConsent");
@@ -153,7 +227,7 @@ public class SharedVoiceNoteFlowTest {
     }
 
     @Test public void warmShareNavigatesFromSpeakAndSecondOpusNoteResetsConsent() throws Exception {
-        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+        try (SharedActivity scenario = SharedActivity.launch(MainActivity.class)) {
             await(scenario, "Speak screen did not initialize", "document.getElementById('personOneLanguage')?.options.length > 0");
             context.startActivity(share(file("first.wav", wav())));
             selected(scenario, wav().length);
@@ -168,7 +242,7 @@ public class SharedVoiceNoteFlowTest {
 
     @Test public void spoofedAudioIsRejectedByItsBytes() throws Exception {
         byte[] invalid = "<html>This is not an audio note; the MIME type must not be trusted.</html>".getBytes(StandardCharsets.UTF_8);
-        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(share(file("spoofed.wav", invalid)))) {
+        try (SharedActivity scenario = SharedActivity.launch(share(file("spoofed.wav", invalid)))) {
             await(scenario, "Spoofed media did not show the safe fallback",
                 "document.getElementById('voiceNoteStatus')?.textContent.startsWith('Direct sharing is unavailable.') && document.getElementById('translateNote').disabled");
             assertEquals("true", evaluate(scenario, "document.getElementById('noteResults').hidden && document.getElementById('originalNoteAudio').hidden"));
@@ -179,7 +253,7 @@ public class SharedVoiceNoteFlowTest {
     @Test public void oversizedAudioIsRejectedBeforeFileSelection() throws Exception {
         byte[] huge = new byte[4_000_001];
         System.arraycopy(wav(), 0, huge, 0, 44);
-        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(share(file("oversized.wav", huge)))) {
+        try (SharedActivity scenario = SharedActivity.launch(share(file("oversized.wav", huge)))) {
             await(scenario, "Oversized media was not rejected",
                 "document.getElementById('voiceNoteStatus')?.textContent.startsWith('Direct sharing is unavailable.') && document.getElementById('voiceNoteFile').files.length === 0 && document.getElementById('translateNote').disabled");
         }
@@ -189,21 +263,21 @@ public class SharedVoiceNoteFlowTest {
         Uri one = file("one.wav", wav()), two = file("two.wav", wav());
         Intent intent = share(one);
         intent.getClipData().addItem(new ClipData.Item(two));
-        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(intent)) {
+        try (SharedActivity scenario = SharedActivity.launch(intent)) {
             await(scenario, "Multiple attachments were accepted",
                 "document.getElementById('voiceNoteStatus')?.textContent.startsWith('Direct sharing is unavailable.') && document.getElementById('voiceNoteFile').files.length === 0");
         }
     }
 
     @Test public void externalUrlIsNotDownloadedAsSharedMedia() throws Exception {
-        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(share(Uri.parse("https://example.invalid/private-note.wav")))) {
+        try (SharedActivity scenario = SharedActivity.launch(share(Uri.parse("https://example.invalid/private-note.wav")))) {
             await(scenario, "An external URL was not rejected",
                 "document.getElementById('voiceNoteStatus')?.textContent.startsWith('Direct sharing is unavailable.') && document.getElementById('voiceNoteFile').files.length === 0");
         }
     }
 
     @Test public void recreationDoesNotReimportConsumedAudio() throws Exception {
-        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(share(file("restart.wav", wav())))) {
+        try (SharedActivity scenario = SharedActivity.launch(share(file("restart.wav", wav())))) {
             selected(scenario, wav().length);
             scenario.recreate();
             await(scenario, "Recreated mobile UI did not start", "document.querySelector('.mobile-tabs')");
@@ -213,7 +287,7 @@ public class SharedVoiceNoteFlowTest {
     }
 
     @Test public void simulatedServiceFailureAndCancellationNeverInventTranslation() throws Exception {
-        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(share(file("errors.wav", wav())))) {
+        try (SharedActivity scenario = SharedActivity.launch(share(file("errors.wav", wav())))) {
             selected(scenario, wav().length);
             assertEquals("true", evaluate(scenario, "window.__testCalls = 0; window.fetch = async () => { window.__testCalls++; return new Response(JSON.stringify({error:'Test service unavailable. Try again later.'}), {status:503,headers:{'Content-Type':'application/json'}}); }; true"));
             tap(scenario, "translateNote");
