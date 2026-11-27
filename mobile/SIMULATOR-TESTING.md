@@ -15,6 +15,7 @@ Run the `Mobile validation` workflow on `feat/mobile-apps`, or connect an Androi
 | Activity recreation | A consumed note is not imported again after activity recreation |
 | Simulated provider failure | An explicit test-only 503 response recovers without fabricated output or automatic retry |
 | Cancellation | An explicitly simulated pending request is aborted; no stale result is shown |
+| Small-screen feedback | Unsupported-share, service-failure and cancellation messages appear inside the viewport above the fixed navigation |
 
 Tests generate PCM silence and contain a tiny FFmpeg-generated OGG/Opus silence fixture. They contain no recorded people or WhatsApp message content. Files are written only to the existing app-private export-cache subtree for the test, read through the production FileProvider/receiver, then deleted. Production APK/AAB assets do not include instrumentation code or fixture bytes.
 

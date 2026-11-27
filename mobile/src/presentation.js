@@ -77,7 +77,25 @@ function prepareNoteScreen() {
     }
   });
   resultObserver.observe(document.getElementById('noteTranslation'), { childList: true, characterData: true, subtree: true });
-  window.addEventListener('pagehide', () => { observer.disconnect(); resultObserver.disconnect(); }, { once: true });
+  // A short screen can place status below the fixed navigation. Reveal progress
+  // and failures after a requested action, while keeping a newly shared note at
+  // its file/language controls and giving completed translations precedence.
+  let requestedAction = false;
+  for (const id of ['translateNote', 'cancelNote', 'playNoteTranslation']) {
+    document.getElementById(id).addEventListener('click', () => { requestedAction = true; });
+  }
+  input.addEventListener('change', () => { requestedAction = false; });
+  clear.addEventListener('click', () => { requestedAction = false; });
+  const status = document.getElementById('voiceNoteStatus');
+  const statusObserver = new MutationObserver(() => {
+    const failedShare = status.textContent.startsWith('Direct sharing is unavailable.');
+    if ((!requestedAction && !failedShare) || status.textContent.startsWith('Translation ready.')) return;
+    // Immediate positioning also respects reduced-motion users and avoids
+    // racing a pending Cancel tap with a smooth scrolling animation.
+    status.scrollIntoView({ behavior: 'instant', block: 'center' });
+  });
+  statusObserver.observe(status, { childList: true, characterData: true, subtree: true });
+  window.addEventListener('pagehide', () => { observer.disconnect(); resultObserver.disconnect(); statusObserver.disconnect(); }, { once: true });
 }
 
 export function finishNotePresentation() {

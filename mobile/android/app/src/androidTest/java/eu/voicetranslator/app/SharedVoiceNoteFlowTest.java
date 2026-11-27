@@ -215,6 +215,11 @@ public class SharedVoiceNoteFlowTest {
         } finally { image.recycle(); }
     }
 
+    private void visibleStatus(SharedActivity scenario) throws Exception {
+        await(scenario, "Status is obscured by the viewport or bottom navigation",
+            "(() => { const r = document.getElementById('voiceNoteStatus').getBoundingClientRect(); const nav = document.querySelector('.mobile-tabs').getBoundingClientRect(); return r.top >= 0 && r.bottom <= Math.min(innerHeight, nav.top); })()");
+    }
+
     @After public void removeSyntheticAudio() {
         File[] files = fixtures.listFiles();
         if (files != null) for (File f : files) assertTrue("Synthetic fixture cleanup failed", f.delete());
@@ -256,6 +261,7 @@ public class SharedVoiceNoteFlowTest {
             await(scenario, "Spoofed media did not show the safe fallback",
                 "document.getElementById('voiceNoteStatus')?.textContent.startsWith('Direct sharing is unavailable.') && document.getElementById('translateNote').disabled");
             assertEquals("true", evaluate(scenario, "document.getElementById('noteResults').hidden && document.getElementById('originalNoteAudio').hidden"));
+            visibleStatus(scenario);
             screenshot("03-unsupported-note-fallback");
         }
     }
@@ -308,6 +314,7 @@ public class SharedVoiceNoteFlowTest {
             await(scenario, "Service failure did not recover safely",
                 "document.getElementById('voiceNoteStatus').textContent === 'Test service unavailable. Try again later.' && !document.getElementById('translateNote').disabled");
             assertEquals("true", evaluate(scenario, "window.__testCalls === 1 && document.getElementById('noteResults').hidden && !document.getElementById('noteTranslation').textContent"));
+            visibleStatus(scenario);
             screenshot("04-simulated-service-failure");
             assertEquals("true", evaluate(scenario, "window.fetch = (input, options) => new Promise((resolve, reject) => { window.__testCalls++; options.signal.addEventListener('abort', () => reject(new DOMException('Cancelled','AbortError')), {once:true}); }); true"));
             tap(scenario, "translateNote");
@@ -315,6 +322,7 @@ public class SharedVoiceNoteFlowTest {
             tap(scenario, "cancelNote");
             await(scenario, "Cancellation left a request or stale translation visible",
                 "document.getElementById('voiceNoteStatus').textContent.startsWith('Cancelled.') && document.getElementById('cancelNote').hidden && !document.getElementById('translateNote').disabled && document.getElementById('noteResults').hidden && !document.getElementById('noteTranslation').textContent");
+            visibleStatus(scenario);
         }
     }
 }
