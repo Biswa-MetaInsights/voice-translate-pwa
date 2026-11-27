@@ -33,4 +33,4 @@ At 320 px and 390 px, check wrapping and scrolling with real rendered screens. T
 | Service capacity | Global limits, provider quotas, cost budgets and load behavior verified on the test backend |
 | Distribution | Signing, developer accounts, privacy/store disclosures, support/deletion details, release and rollback procedures reviewed |
 
-JavaScript and browser fixture tests do not replace native compilation, phone testing, speech evaluation or load testing. Do not call an app store-ready until its outstanding gates pass. The manual GitHub workflow has not been run. Local Android compilation is now separate evidence; emulator/physical-device execution is still pending.
+JavaScript and browser fixture tests do not replace native compilation, phone testing, speech evaluation or load testing. Do not call an app store-ready until its outstanding gates pass. GitHub CI compiles both native targets and runs Android installed-app tests. iOS simulator compilation is not iOS runtime testing. Physical-device execution, actual WhatsApp sharing and human-reviewed speech evaluation remain release gates.

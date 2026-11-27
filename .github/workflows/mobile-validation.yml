@@ -61,7 +61,7 @@ jobs:
           api-level: 36
           arch: x86_64
           working-directory: mobile/android
-          script: ./gradlew :app:connectedDebugAndroidTest --console=plain
+          script: bash ../scripts/run-android-simulator.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
