@@ -2,6 +2,8 @@
 
 Run the `Mobile validation` workflow on `feat/mobile-apps`, or connect an Android SDK 36 emulator and run `./gradlew :app:connectedDebugAndroidTest` from `mobile/android` after the mobile build/sync and native build. CI runs on Android 16. Scope the task to `:app` so generated dependency modules do not run unrelated instrumentation suites.
 
+CI caches Gradle dependencies and attaches `scripts/ci-repositories.init.gradle` to its Gradle invocations. This uses [Google's documented HTTPS Maven Central mirror](https://docs.cloud.google.com/docs/buildpacks/java#google_cloud_hosted_maven_central_mirror) for Maven Central coordinates after shared-runner downloads were rate-limited. Version coordinates, Google's Android repository, release repositories and the live PWA remain unchanged. Local commands do not attach this CI-only selection unless explicitly requested.
+
 ## What the installed-app tests exercise
 
 | Case | Expected behavior |

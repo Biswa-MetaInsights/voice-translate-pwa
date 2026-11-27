@@ -3,7 +3,7 @@
 set -uo pipefail
 
 test_status=0
-./gradlew :app:connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true --console=plain || test_status=$?
+./gradlew --init-script ../scripts/ci-repositories.init.gradle :app:connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true --console=plain || test_status=$?
 
 # Collect synthetic-content screenshots even when a later test fails.
 mkdir -p app/build/reports/simulator-evidence
