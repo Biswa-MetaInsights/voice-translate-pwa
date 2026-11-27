@@ -70,6 +70,7 @@ jobs:
             mobile/android/app/build/outputs/apk/debug/*.apk
             mobile/android/app/build/outputs/bundle/release/*.aab
             mobile/android/app/build/reports/
+            mobile/android/app/build/outputs/androidTest-results/
           retention-days: 7
   ios:
     runs-on: macos-latest

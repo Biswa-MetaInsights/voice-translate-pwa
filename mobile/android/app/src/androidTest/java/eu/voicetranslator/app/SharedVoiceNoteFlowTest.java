@@ -81,11 +81,21 @@ public class SharedVoiceNoteFlowTest {
         }
 
         void onActivity(Consumer<MainActivity> action) {
+            AtomicReference<Throwable> failure = new AtomicReference<>();
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
-                MainActivity activity = current.get();
-                assertNotNull("Shared activity is unavailable", activity);
-                action.accept(activity);
+                try {
+                    MainActivity activity = current.get();
+                    assertNotNull("Shared activity is unavailable", activity);
+                    action.accept(activity);
+                } catch (RuntimeException | AssertionError error) {
+                    // Assertions belong on the test thread. Throwing from the
+                    // UI thread kills instrumentation instead of reporting it.
+                    failure.set(error);
+                }
             });
+            Throwable error = failure.get();
+            if (error instanceof AssertionError) throw (AssertionError) error;
+            if (error instanceof RuntimeException) throw (RuntimeException) error;
         }
 
         void recreate() throws Exception {
