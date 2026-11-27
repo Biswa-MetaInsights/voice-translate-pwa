@@ -1,0 +1,23 @@
+import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+
+// CI-only repository selection. Keep pinned coordinates and HTTPS; do not use
+// a user-supplied repository URL. Google's documented Central mirror reduces
+// repeated downloads from rate-limited shared GitHub runner egress.
+def centralMirror = { repositories ->
+    repositories.all { repository ->
+        if (repository instanceof MavenArtifactRepository &&
+            repository.url.scheme == 'https' &&
+            repository.url.host in ['repo.maven.apache.org', 'repo1.maven.org']) {
+            repository.setUrl('https://maven-central.storage-download.googleapis.com/maven2/')
+        }
+    }
+}
+
+gradle.settingsEvaluated { settings ->
+    centralMirror(settings.pluginManagement.repositories)
+    centralMirror(settings.dependencyResolutionManagement.repositories)
+}
+gradle.beforeProject { project ->
+    centralMirror(project.buildscript.repositories)
+    centralMirror(project.repositories)
+}
